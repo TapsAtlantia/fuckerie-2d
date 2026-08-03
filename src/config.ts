@@ -36,6 +36,7 @@ export const REACH_TILES = 7; // max mining/placing distance from player centre
 // Depth bands, in absolute world-Y TILES (+Y is down). Surface oscillates near 0.
 export const BAND = {
   SKY: -400, // y < SKY  -> space / floating islands
+  SURFACE: 0, // surface level
   UNDERGROUND: 0, // 0..CAVERN
   CAVERN: 600,
   UNDERWORLD: 40000,

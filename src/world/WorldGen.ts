@@ -1,11 +1,13 @@
 import { BAND, CHUNK_SIZE } from "../config";
-import { Noise, hash2 } from "./Noise";
+import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId } from "./Tile";
 import { BiomeSystem, type Biome } from "./Biome";
 import { CaveSystem } from "./Caves";
 import { OreSystem } from "./Ores";
 import { StructureSystem } from "./Structures";
+import { MicroBiomeSystem } from "./MicroBiomes";
+import { BiomeModifierSystem } from "./BiomeModifiers";
 
 // Procedural terrain. Pure function of (seed, worldX, worldY): the same coordinate always
 // generates the same tile no matter how the player reached it, which is what lets the world
@@ -16,19 +18,25 @@ import { StructureSystem } from "./Structures";
 
 export class WorldGen {
   private noise: Noise;
+  private layeredNoise: LayeredNoiseSystem;
   private biomeSystem: BiomeSystem;
   private caveSystem: CaveSystem;
   private oreSystem: OreSystem;
   private structureSystem: StructureSystem;
+  private microBiomeSystem: MicroBiomeSystem;
+  private biomeModifierSystem: BiomeModifierSystem;
   readonly seed: number;
 
   constructor(seed: number) {
     this.seed = seed;
     this.noise = new Noise(seed);
+    this.layeredNoise = new LayeredNoiseSystem(seed);
     this.biomeSystem = new BiomeSystem(seed);
     this.caveSystem = new CaveSystem(seed);
     this.oreSystem = new OreSystem(seed);
     this.structureSystem = new StructureSystem(seed, this.noise);
+    this.microBiomeSystem = new MicroBiomeSystem(seed);
+    this.biomeModifierSystem = new BiomeModifierSystem(seed);
   }
 
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
@@ -36,11 +44,10 @@ export class WorldGen {
     // Biome-aware elevation with continuous amplitude transitions
     const amplitude = this.biomeSystem.surfaceAmplitudeAt(worldX);
     
-    // Two octaves of scale: broad landmass sweeps + smaller rolling hills
-    const broad = this.noise.fbm2D(worldX * 0.0012, 41.7, 3) * 42 * amplitude;
-    const hills = this.noise.fbm2D(worldX * 0.012, 12.3, 4) * 16 * amplitude;
+    // Use layered noise for more varied terrain
+    const terrain = this.layeredNoise.terrainHeight(worldX, 0, amplitude);
     
-    return Math.floor(broad + hills);
+    return Math.floor(terrain);
   }
 
   /** Get the appropriate stone variant for a given depth and position. */
@@ -59,17 +66,26 @@ export class WorldGen {
     const baseY = cy * CHUNK_SIZE;
 
     // Per-column caches for performance
-    const biomeCache: Biome[] = new Array(CHUNK_SIZE);
+    const biomeCache: (Biome & { appliedModifiers?: string[] })[] = new Array(CHUNK_SIZE);
     const surfaceHeightCache: number[] = new Array(CHUNK_SIZE);
     const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
+    const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const worldX = baseX + lx;
-      biomeCache[lx] = this.biomeSystem.surfaceBiomeAt(worldX);
+      let biome = this.biomeSystem.surfaceBiomeAt(worldX);
+      
+      // Apply biome modifiers
+      biome = this.biomeModifierSystem.applyModifiers(biome, worldX, baseY, baseY);
+      
+      biomeCache[lx] = biome;
       surfaceHeightCache[lx] = this.surfaceHeight(worldX);
       dirtDepthCache[lx] = biomeCache[lx].subSurfaceDepth + Math.floor(
         (this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2
       );
+      
+      // Check for micro-biomes (coarse check per column)
+      microBiomeCache[lx] = null; // Will be checked per-tile for precision
     }
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -124,6 +140,16 @@ export class WorldGen {
           const ore = this.oreSystem.oreAt(worldX, worldY, biome);
           if (ore !== null) {
             fg = ore;
+          }
+        }
+
+        // Check for micro-biomes (override blocks if in micro-biome)
+        const microBiome = this.microBiomeSystem.checkForMicroBiome(worldX, worldY, biome);
+        if (microBiome) {
+          // Apply micro-biome effects (simplified for now)
+          if (microBiome.uniqueBlocks.length > 0) {
+            const blockIndex = Math.floor(hash2(worldX, worldY, this.seed + 8888) * microBiome.uniqueBlocks.length);
+            fg = microBiome.uniqueBlocks[blockIndex % microBiome.uniqueBlocks.length];
           }
         }
 

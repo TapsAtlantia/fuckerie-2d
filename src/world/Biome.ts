@@ -1,4 +1,4 @@
-import { Noise } from "./Noise";
+import { Noise, LayeredNoiseSystem, hash2 } from "./Noise";
 import { TileId } from "./Tile";
 import { BAND, BIOME } from "../config";
 
@@ -19,6 +19,9 @@ export interface Biome {
   oreWeighting: readonly [string, number][]; // ore type -> weight multiplier
   caveStyle: CaveStyle;
   undergroundVariant: TileId; // stone variant for underground biomes
+  isHybrid: boolean; // whether this is a hybrid biome
+  parentBiomes?: string[]; // parent biome names if hybrid
+  blendFactor?: number; // 0-1 blend ratio if hybrid
 }
 
 // Surface biomes arranged by temperature (X) and humidity (Y) - Whittaker diagram style
@@ -37,6 +40,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["sand", 1.5]],
     caveStyle: "normal",
     undergroundVariant: TileId.Sandstone,
+    isHybrid: false,
   },
   {
     name: "savanna",
@@ -52,6 +56,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["iron", 1.2]],
     caveStyle: "normal",
     undergroundVariant: TileId.Stone,
+    isHybrid: false,
   },
   {
     name: "plains",
@@ -67,6 +72,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["coal", 1.3]],
     caveStyle: "normal",
     undergroundVariant: TileId.Stone,
+    isHybrid: false,
   },
   {
     name: "forest",
@@ -82,6 +88,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["copper", 1.4]],
     caveStyle: "lush",
     undergroundVariant: TileId.MossyStone,
+    isHybrid: false,
   },
   {
     name: "jungle",
@@ -97,6 +104,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["gold", 1.3]],
     caveStyle: "lush",
     undergroundVariant: TileId.MossyStone,
+    isHybrid: false,
   },
   {
     name: "swamp",
@@ -112,6 +120,39 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["clay", 2.0]],
     caveStyle: "lush",
     undergroundVariant: TileId.MossyStone,
+    isHybrid: false,
+  },
+  {
+    name: "mountain",
+    topBlock: TileId.Stone,
+    subSurfaceBlock: TileId.Stone,
+    subSurfaceDepth: 2,
+    stoneVariant: TileId.Granite,
+    surfaceAmplitude: 2.0, // very tall
+    treeType: null,
+    treeDensity: 0,
+    plants: [TileId.DeadBush],
+    plantDensity: 0.1,
+    oreWeighting: [["silver", 2.0], ["gold", 1.5]],
+    caveStyle: "normal",
+    undergroundVariant: TileId.Granite,
+    isHybrid: false,
+  },
+  {
+    name: "volcanic",
+    topBlock: TileId.Cobblestone,
+    subSurfaceBlock: TileId.Basalt,
+    subSurfaceDepth: 3,
+    stoneVariant: TileId.Basalt,
+    surfaceAmplitude: 1.3,
+    treeType: null,
+    treeDensity: 0,
+    plants: [TileId.DeadBush],
+    plantDensity: 0.05,
+    oreWeighting: [["gold", 2.5], ["copper", 1.8]],
+    caveStyle: "underworld",
+    undergroundVariant: TileId.Hellstone,
+    isHybrid: false,
   },
   {
     name: "snowy",
@@ -127,6 +168,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["silver", 1.5]],
     caveStyle: "frozen",
     undergroundVariant: TileId.Ice,
+    isHybrid: false,
   },
   {
     name: "tundra",
@@ -142,6 +184,7 @@ const SURFACE_BIOMES: readonly Biome[] = [
     oreWeighting: [["iron", 1.2]],
     caveStyle: "frozen",
     undergroundVariant: TileId.Ice,
+    isHybrid: false,
   },
 ];
 
@@ -160,39 +203,195 @@ const UNDERGROUND_BIOMES: readonly UndergroundBiome[] = [
   { name: "underworld", stoneVariant: TileId.Hellstone, caveStyle: "underworld", minDepth: BAND.UNDERWORLD },
 ];
 
+// Hybrid biome configurations
+interface HybridBiomeConfig {
+  result: string;
+  transition: "gradient" | "patchwork" | "mixed";
+  overrides?: Partial<Biome>;
+}
+
+const BIOME_BLEND_MATRIX: Record<string, HybridBiomeConfig> = {
+  "desert+jungle": { result: "oasis", transition: "patchwork" },
+  "forest+swamp": { result: "wetland", transition: "gradient" },
+  "snowy+mountain": { result: "glacier", transition: "mixed" },
+  "plains+volcanic": { result: "ash-lands", transition: "gradient" },
+  "desert+forest": { result: "savanna-edge", transition: "gradient" },
+  "jungle+mountain": { result: "rainforest-highlands", transition: "mixed" },
+  "snowy+forest": { result: "taiga", transition: "gradient" },
+  "swamp+ocean": { result: "mangrove", transition: "patchwork" },
+  "mountain+volcanic": { result: "volcanic-peak", transition: "mixed" },
+  "desert+mountain": { result: "mesa", transition: "gradient" },
+  "forest+mountain": { result: "highland-forest", transition: "mixed" },
+};
+
 export class BiomeSystem {
   private noise: Noise;
+  private layeredNoise: LayeredNoiseSystem;
   private seed: number;
+  
+  // Biome region configuration for overlap detection
+  private readonly REGION_SIZE = 500; // tiles
+  private readonly TRANSITION_WIDTH = 100; // tiles
 
   constructor(seed: number) {
     this.seed = seed;
     this.noise = new Noise(seed);
+    this.layeredNoise = new LayeredNoiseSystem(seed);
   }
 
-  /** Get surface biome at world X using temperature/humidity Whittaker diagram. */
+  /** Get surface biome at world X using temperature/humidity Whittaker diagram with blending. */
   surfaceBiomeAt(worldX: number): Biome {
-    // Temperature: -1 (cold) to 1 (hot)
-    const temp = this.noise.fbm2D(worldX * BIOME.TEMPERATURE_SCALE, 17.3, 3);
-    // Humidity: -1 (dry) to 1 (wet)
-    const humidity = this.noise.fbm2D(worldX * BIOME.HUMIDITY_SCALE + 100, 42.7, 3);
+    // Use layered noise for more detailed climate
+    const climate = this.layeredNoise.climate(worldX, 0);
+    const temp = climate.temperature;
+    const humidity = climate.humidity;
 
-    // Whittaker diagram mapping
-    if (temp > 0.4) {
+    // Get primary biome from climate
+    const primary = this.selectPrimaryBiome(temp, humidity, worldX);
+    
+    // Check for biome overlap with neighboring regions
+    const blendInfo = this.checkBiomeOverlap(worldX, primary);
+    
+    if (blendInfo) {
+      return this.generateHybridBiome(primary, blendInfo.secondary, blendInfo.factor, blendInfo.config);
+    }
+    
+    return primary;
+  }
+  
+  private selectPrimaryBiome(temp: number, humidity: number, worldX: number): Biome {
+    // Whittaker diagram mapping with additional mountain/volcanic logic
+    const elevation = this.layeredNoise.terrainHeight(worldX, 0, 1); // Use noise for mountain check
+    
+    if (temp > 0.6) {
+      // Very hot - volcanic possible
+      if (humidity < -0.4) return SURFACE_BIOMES[0]; // desert
+      if (humidity < 0.1) return SURFACE_BIOMES[1]; // savanna
+      if (elevation > 80) return SURFACE_BIOMES[9]; // volcanic (on peaks)
+      return SURFACE_BIOMES[4]; // jungle
+    } else if (temp > 0.4) {
       // Hot
       if (humidity < -0.3) return SURFACE_BIOMES[0]; // desert
       if (humidity < 0.2) return SURFACE_BIOMES[1]; // savanna
       return SURFACE_BIOMES[4]; // jungle
     } else if (temp > -0.2) {
       // Temperate
+      if (elevation > 60) return SURFACE_BIOMES[8]; // mountain (on peaks)
       if (humidity < -0.2) return SURFACE_BIOMES[1]; // savanna
       if (humidity < 0.3) return SURFACE_BIOMES[2]; // plains
       if (humidity < 0.7) return SURFACE_BIOMES[3]; // forest
       return SURFACE_BIOMES[5]; // swamp
+    } else if (temp > -0.5) {
+      // Cool - mountain possible
+      if (elevation > 40) return SURFACE_BIOMES[8]; // mountain
+      if (humidity < 0) return SURFACE_BIOMES[7]; // tundra
+      return SURFACE_BIOMES[6]; // snowy
     } else {
       // Cold
       if (humidity < 0) return SURFACE_BIOMES[7]; // tundra
       return SURFACE_BIOMES[6]; // snowy
     }
+  }
+  
+  private checkBiomeOverlap(worldX: number, primary: Biome): { secondary: Biome; factor: number; config: HybridBiomeConfig } | null {
+    // Calculate region coordinates
+    const regionX = Math.floor(worldX / this.REGION_SIZE);
+    const regionY = Math.floor(0 / this.REGION_SIZE); // Y is less relevant for surface biomes
+    
+    // Get region's dominant biome
+    const regionHash = hash2(regionX, regionY, this.seed + 100);
+    const regionBiomeIndex = Math.floor(regionHash * SURFACE_BIOMES.length);
+    const regionBiome = SURFACE_BIOMES[regionBiomeIndex % SURFACE_BIOMES.length];
+    
+    // If different from primary, check if we're in transition zone
+    if (regionBiome.name !== primary.name) {
+      const positionInRegion = worldX % this.REGION_SIZE;
+      const distFromCenter = Math.abs(positionInRegion - this.REGION_SIZE / 2);
+      
+      if (distFromCenter > (this.REGION_SIZE / 2 - this.TRANSITION_WIDTH)) {
+        // In transition zone - calculate blend factor
+        const factor = (distFromCenter - (this.REGION_SIZE / 2 - this.TRANSITION_WIDTH)) / this.TRANSITION_WIDTH;
+        const smoothFactor = this.smoothstep(0, 1, factor);
+        
+        // Check if this combination has a hybrid biome
+        const blendKey = this.getBlendKey(primary.name, regionBiome.name);
+        const config = BIOME_BLEND_MATRIX[blendKey];
+        
+        if (config) {
+          return { secondary: regionBiome, factor: smoothFactor, config };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  private generateHybridBiome(primary: Biome, secondary: Biome, factor: number, config: HybridBiomeConfig): Biome {
+    const result: Biome = { ...primary, isHybrid: true, parentBiomes: [primary.name, secondary.name], blendFactor: factor };
+    
+    switch (config.transition) {
+      case "gradient":
+        // Smooth interpolation of properties
+        result.topBlock = factor > 0.5 ? secondary.topBlock : primary.topBlock;
+        result.subSurfaceBlock = this.lerpBlock(primary.subSurfaceBlock, secondary.subSurfaceBlock, factor);
+        result.surfaceAmplitude = this.lerp(primary.surfaceAmplitude, secondary.surfaceAmplitude, factor);
+        result.caveStyle = factor > 0.7 ? secondary.caveStyle : primary.caveStyle;
+        break;
+        
+      case "patchwork":
+        // Random mixture based on factor
+        const h = hash2(Math.floor(primary.surfaceAmplitude * 100), Math.floor(secondary.surfaceAmplitude * 100), this.seed);
+        result.topBlock = h < factor ? secondary.topBlock : primary.topBlock;
+        result.plants = this.shuffleAndMerge(primary.plants, secondary.plants, factor);
+        break;
+        
+      case "mixed":
+        // Some properties from primary, some from secondary
+        result.topBlock = secondary.topBlock;
+        result.subSurfaceBlock = primary.subSurfaceBlock;
+        result.plants = [...primary.plants, ...secondary.plants];
+        result.treeType = secondary.treeType !== null ? secondary.treeType : primary.treeType;
+        break;
+    }
+    
+    // Apply hybrid-specific overrides
+    if (config.overrides) {
+      Object.assign(result, config.overrides);
+    }
+    
+    return result;
+  }
+  
+  private lerpBlock(a: TileId, b: TileId, t: number): TileId {
+    return t > 0.5 ? b : a;
+  }
+  
+  private lerp(a: number, b: number, t: number): number {
+    return a + (b - a) * t;
+  }
+  
+  private smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+  }
+  
+  private getBlendKey(a: string, b: string): string {
+    return [a, b].sort().join('+');
+  }
+  
+  private shuffleAndMerge<T>(a: readonly T[], b: readonly T[], factor: number): T[] {
+    const result: T[] = [...a];
+    const takeCount = Math.floor(b.length * factor);
+    
+    for (let i = 0; i < takeCount; i++) {
+      const h = hash2(i, factor, this.seed);
+      const index = Math.floor(h * b.length);
+      if (!result.includes(b[index])) {
+        result.push(b[index]);
+      }
+    }
+    
+    return result;
   }
 
   /** Get underground biome at world X, Y based on depth and region. */
@@ -232,8 +431,9 @@ export class BiomeSystem {
   /** Get continuous surface amplitude at X (biome-modulated height variation). */
   surfaceAmplitudeAt(worldX: number): number {
     const biome = this.surfaceBiomeAt(worldX);
-    // Smooth amplitude transitions using another noise layer
-    const smooth = this.noise.fbm2D(worldX * BIOME.AMPLITUDE_SMOOTH_SCALE, 123.4, 2) * 0.3 + 1;
+    // Use layered noise for more natural amplitude variation
+    const climate = this.layeredNoise.climate(worldX, 0);
+    const smooth = 1 + climate.precipitation * 0.3; // More precipitation = more variation
     return biome.surfaceAmplitude * smooth;
   }
 }

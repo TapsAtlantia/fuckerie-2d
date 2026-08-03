@@ -1,4 +1,4 @@
-// Self-contained, seedable 2D simplex noise + fBm. No external dependencies so the
+// Self-contained, seedable 2D simplex noise + fBm + Worley noise. No external dependencies so the
 // prototype runs fully offline on GitHub Pages. Generation is a pure function of the
 // seed + coordinates, which is what makes the infinite world deterministic.
 
@@ -26,8 +26,10 @@ function mulberry32(seed: number): () => number {
 export class Noise {
   private perm = new Uint8Array(512);
   private permMod12 = new Uint8Array(512);
+  readonly seed: number;
 
   constructor(seed: number) {
+    this.seed = seed;
     const rand = mulberry32(seed);
     const p = new Uint8Array(256);
     for (let i = 0; i < 256; i++) p[i] = i;
@@ -112,6 +114,52 @@ export class Noise {
     }
     return sum / norm;
   }
+
+  /** Worley noise (cellular noise) for rocky/uneven surfaces - returns distance to nearest feature point. */
+  worley2D(x: number, y: number, scale: number): number {
+    const cellX = Math.floor(x * scale);
+    const cellY = Math.floor(y * scale);
+    
+    let minDist = Infinity;
+    
+    // Check 3x3 grid of cells around current position
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = cellX + dx;
+        const cy = cellY + dy;
+        
+        // Generate feature point within this cell
+        const h = hash2(cx, cy, this.seed);
+        const fx = cx + h;
+        const fy = cy + ((h * 7) % 1);
+        
+        const dist = Math.sqrt((x * scale - fx) ** 2 + (y * scale - fy) ** 2);
+        if (dist < minDist) {
+          minDist = dist;
+        }
+      }
+    }
+    
+    return minDist;
+  }
+
+  /** Ridged multifractal noise - creates sharp, mountain-like features. */
+  ridgedFbm2D(x: number, y: number, octaves = 4, lacunarity = 2, gain = 0.5): number {
+    let freq = 1;
+    let amp = 1;
+    let sum = 0;
+    let norm = 0;
+    
+    for (let o = 0; o < octaves; o++) {
+      const n = 1 - Math.abs(this.noise2D(x * freq, y * freq));
+      sum += amp * n * n;
+      norm += amp;
+      freq *= lacunarity;
+      amp *= gain;
+    }
+    
+    return sum / norm;
+  }
 }
 
 /**
@@ -123,4 +171,87 @@ export function hash2(x: number, y: number, seed: number): number {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Layered noise system for anti-repetitive terrain generation.
+ * Combines multiple noise algorithms at different scales for natural-looking terrain.
+ */
+export class LayeredNoiseSystem {
+  private continental: Noise;
+  private regional: Noise;
+  private local: Noise;
+  private micro: Noise;
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+    this.continental = new Noise(seed);
+    this.regional = new Noise(seed + 1);
+    this.local = new Noise(seed + 2);
+    this.micro = new Noise(seed + 3);
+  }
+
+  /**
+   * Generate terrain height using layered noise composition.
+   * @param x World X coordinate
+   * @param y World Y coordinate (for 3D terrain variations)
+   * @param amplitude Biome-specific amplitude multiplier
+   */
+  terrainHeight(x: number, y: number, amplitude: number = 1): number {
+    // Continental-scale features (10,000+ tiles)
+    const continental = this.continental.fbm2D(x * 0.00005, y * 0.00005, 6) * 200;
+    
+    // Regional features (1,000-10,000 tiles)
+    const regional = this.regional.fbm2D(x * 0.0002, y * 0.0002, 4) * 80;
+    
+    // Local terrain (10-1,000 tiles)
+    const local = this.local.fbm2D(x * 0.002, y * 0.002, 3) * 30;
+    
+    // Micro-features (1-10 tiles) using Worley noise for rocky surfaces
+    const micro = (this.micro.worley2D(x, y, 0.02) - 0.5) * 5;
+    
+    return (continental + regional + local + micro) * amplitude;
+  }
+
+  /**
+   * Generate climate data (temperature, humidity, precipitation).
+   */
+  climate(x: number, y: number): Climate {
+    const temperature = this.continental.fbm2D(x * 0.00008, y * 0.00008, 4); // -1 (cold) to 1 (hot)
+    const humidity = this.regional.fbm2D(x * 0.00008 + 100, y * 0.00008 + 100, 4); // -1 (dry) to 1 (wet)
+    const precipitation = Math.max(0, this.local.fbm2D(x * 0.0001, y * 0.0001, 3)); // 0 to 1
+    
+    return { temperature, humidity, precipitation };
+  }
+
+  /**
+   * Generate mountain-specific terrain using ridged noise.
+   */
+  mountainHeight(x: number, y: number, amplitude: number = 1): number {
+    const base = this.regional.ridgedFbm2D(x * 0.0003, y * 0.0003, 5);
+    const detail = this.local.fbm2D(x * 0.002, y * 0.002, 3) * 20;
+    
+    return (base * 100 + detail) * amplitude;
+  }
+
+  /**
+   * Generate canyon/valley features using domain warping.
+   */
+  canyonDepth(x: number, y: number): number {
+    const warpX = x + this.continental.noise2D(x * 0.01, y * 0.01) * 50;
+    const warpY = y + this.continental.noise2D(x * 0.01 + 50, y * 0.01 + 50) * 50;
+    
+    const canyon = this.regional.fbm2D(warpX * 0.002, warpY * 0.002, 3);
+    
+    // Create sharp canyon where noise is near zero
+    const canyonMask = 1 - Math.abs(canyon);
+    return Math.max(0, canyonMask * 50);
+  }
+}
+
+export interface Climate {
+  temperature: number; // -1 to 1
+  humidity: number; // -1 to 1
+  precipitation: number; // 0 to 1
 }
