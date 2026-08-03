@@ -1,57 +1,55 @@
 import { BAND, CHUNK_SIZE } from "../config";
-import { Noise } from "./Noise";
+import { Noise, hash2 } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId } from "./Tile";
+import { BiomeSystem, type Biome } from "./Biome";
+import { CaveSystem } from "./Caves";
+import { OreSystem } from "./Ores";
+import { StructureSystem } from "./Structures";
 
 // Procedural terrain. Pure function of (seed, worldX, worldY): the same coordinate always
 // generates the same tile no matter how the player reached it, which is what lets the world
 // be infinite in every direction — including tens of thousands of tiles down (+Y) and up (-Y).
 //
-// Phase 1 keeps this deliberately simple (surface height + dirt/stone bands + threshold caves +
-// depth-tinted stone). Phase 2 replaces the internals with worm caves, biomes, cross-chunk
-// structures and sky islands — the public surface (surfaceHeight / generateChunk) stays stable.
+// Phase 2 integrates biomes, worm caves, ores, and sky islands while preserving determinism
+// and seamlessness. The public API (surfaceHeight / generateChunk) stays stable.
 
 export class WorldGen {
   private noise: Noise;
+  private biomeSystem: BiomeSystem;
+  private caveSystem: CaveSystem;
+  private oreSystem: OreSystem;
+  private structureSystem: StructureSystem;
   readonly seed: number;
 
   constructor(seed: number) {
     this.seed = seed;
     this.noise = new Noise(seed);
+    this.biomeSystem = new BiomeSystem(seed);
+    this.caveSystem = new CaveSystem(seed);
+    this.oreSystem = new OreSystem(seed);
+    this.structureSystem = new StructureSystem(seed, this.noise);
   }
 
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
   surfaceHeight(worldX: number): number {
-    // Two octaves of scale: broad landmass sweeps + smaller rolling hills.
-    const broad = this.noise.fbm2D(worldX * 0.0012, 41.7, 3) * 42;
-    const hills = this.noise.fbm2D(worldX * 0.012, 12.3, 4) * 16;
+    // Biome-aware elevation with continuous amplitude transitions
+    const amplitude = this.biomeSystem.surfaceAmplitudeAt(worldX);
+    
+    // Two octaves of scale: broad landmass sweeps + smaller rolling hills
+    const broad = this.noise.fbm2D(worldX * 0.0012, 41.7, 3) * 42 * amplitude;
+    const hills = this.noise.fbm2D(worldX * 0.012, 12.3, 4) * 16 * amplitude;
+    
     return Math.floor(broad + hills);
   }
 
-  // Cave half-width by depth: caves are the minority of tiles (winding tunnels near surface,
-  // more open caverns deeper). A cheap stand-in for the Phase 2 worm-cave system.
-  private caveWidth(worldY: number): number {
-    if (worldY >= BAND.UNDERWORLD) return 0.09; // dense hellstone
-    if (worldY >= BAND.CAVERN) return 0.12; // open caverns
-    if (worldY >= 200) return 0.08;
-    return 0.055; // shallow: sparse, thin caves
-  }
-
-  private isCave(worldX: number, worldY: number): boolean {
-    // Carve tiles near the zero-crossings of two decorrelated noise fields. |n| < w selects a
-    // thin band that follows the crossings → connected, winding tunnels rather than blobs.
-    const f = 0.05;
-    const w = this.caveWidth(worldY);
-    const n1 = this.noise.fbm2D(worldX * f, worldY * f, 4);
-    if (Math.abs(n1) < w) return true;
-    const n2 = this.noise.fbm2D(worldX * f + 31.7, worldY * f - 51.3, 4);
-    return Math.abs(n2) < w;
-  }
-
-  private stoneForDepth(worldY: number): TileId {
+  /** Get the appropriate stone variant for a given depth and position. */
+  private stoneForDepth(worldX: number, worldY: number): TileId {
     if (worldY >= BAND.UNDERWORLD) return TileId.Hellstone;
-    if (worldY >= BAND.CAVERN) return TileId.DeepStone;
-    return TileId.Stone;
+    
+    // Check underground biome for stone variant
+    const undergroundBiome = this.biomeSystem.undergroundBiomeAt(worldX, worldY);
+    return undergroundBiome.stoneVariant;
   }
 
   /** Fill a chunk's foreground + background tiles. */
@@ -60,41 +58,118 @@ export class WorldGen {
     const baseX = cx * CHUNK_SIZE;
     const baseY = cy * CHUNK_SIZE;
 
+    // Per-column caches for performance
+    const biomeCache: Biome[] = new Array(CHUNK_SIZE);
+    const surfaceHeightCache: number[] = new Array(CHUNK_SIZE);
+    const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
+
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const worldX = baseX + lx;
-      const surfaceY = this.surfaceHeight(worldX);
-      const dirtDepth = 4 + Math.floor((this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2); // 4..8
+      biomeCache[lx] = this.biomeSystem.surfaceBiomeAt(worldX);
+      surfaceHeightCache[lx] = this.surfaceHeight(worldX);
+      dirtDepthCache[lx] = biomeCache[lx].subSurfaceDepth + Math.floor(
+        (this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2
+      );
+    }
+
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const worldX = baseX + lx;
+      const biome = biomeCache[lx];
+      const surfaceY = surfaceHeightCache[lx];
+      const dirtDepth = dirtDepthCache[lx];
 
       for (let ly = 0; ly < CHUNK_SIZE; ly++) {
         const worldY = baseY + ly;
 
-        // Above the surface: open air / sky (Phase 2 puts floating islands up here).
-        if (worldY < surfaceY) {
-          continue; // fg + bg already Air
+        // Sky islands (above SKY band)
+        if (worldY < BAND.SKY) {
+          if (this.biomeSystem.skyIslandMask(worldX, worldY)) {
+            // Sky island generation
+            chunk.bg[ly * CHUNK_SIZE + lx] = TileId.SkyStone;
+            chunk.fg[ly * CHUNK_SIZE + lx] = TileId.CloudStone;
+          }
+          continue;
         }
 
-        // Background wall exists everywhere below the surface, so caves read as carved-out
-        // pockets with a wall behind them rather than see-through holes.
+        // Above the surface: open air
+        if (worldY < surfaceY) {
+          continue;
+        }
+
+        // Background wall exists everywhere below the surface
         const belowSurface = worldY - surfaceY;
         chunk.bg[ly * CHUNK_SIZE + lx] =
-          belowSurface < dirtDepth ? TileId.Dirt : this.stoneForDepth(worldY);
+          belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY);
 
-        // Foreground material by depth.
+        // Foreground material by depth and biome
         let fg: TileId;
         if (worldY === surfaceY) {
-          fg = TileId.Grass;
+          fg = biome.topBlock;
         } else if (belowSurface < dirtDepth) {
-          fg = TileId.Dirt;
+          fg = biome.subSurfaceBlock;
         } else {
-          fg = this.stoneForDepth(worldY);
+          fg = this.stoneForDepth(worldX, worldY);
         }
 
-        // Carve caves below a few tiles under the surface (keeps the surface crust intact).
-        if (belowSurface > 3 && this.isCave(worldX, worldY)) {
-          fg = TileId.Air;
+        // Carve caves using the new cave system
+        if (belowSurface > 3) {
+          const caveStyle = biome.caveStyle;
+          if (this.caveSystem.caveAt(worldX, worldY, caveStyle)) {
+            fg = TileId.Air;
+          }
+        }
+
+        // Place ores in stone only
+        if (fg !== TileId.Air && fg !== TileId.CloudStone) {
+          const ore = this.oreSystem.oreAt(worldX, worldY, biome);
+          if (ore !== null) {
+            fg = ore;
+          }
         }
 
         chunk.fg[ly * CHUNK_SIZE + lx] = fg;
+      }
+    }
+
+    // Per-column deco pass for surface vegetation
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const worldX = baseX + lx;
+      const biome = biomeCache[lx];
+      const surfaceY = surfaceHeightCache[lx];
+      
+      // Only place deco if we have the surface block in this chunk
+      if (surfaceY >= baseY && surfaceY < baseY + CHUNK_SIZE) {
+        const ly = surfaceY - baseY;
+        const surfaceBlock = chunk.fg[ly * CHUNK_SIZE + lx];
+        
+        // Check if this biome supports plants and if we should place one
+        if (biome.plants.length > 0 && biome.plantDensity > 0) {
+          const h = hash2(worldX, surfaceY, this.seed + 777);
+          if (h < biome.plantDensity) {
+            // Select a plant type
+            const plantIndex = Math.floor(h * biome.plants.length * 10) % biome.plants.length;
+            const plant = biome.plants[plantIndex];
+            
+            // Check if the tile above is air (space for plant)
+            if (ly + 1 < CHUNK_SIZE && chunk.fg[(ly + 1) * CHUNK_SIZE + lx] === TileId.Air) {
+              // Special cases
+              if (plant === TileId.Cactus && surfaceBlock !== TileId.Sand) continue; // cactus only on sand
+              if (plant === TileId.TallGrass && surfaceBlock === TileId.Sand) continue; // no grass on sand
+              
+              chunk.fg[(ly + 1) * CHUNK_SIZE + lx] = plant;
+            }
+          }
+        }
+      }
+    }
+
+    // Apply structure overrides
+    const structureOverrides = this.structureSystem.structureOverridesForChunk(cx, cy);
+    for (const [key, tiles] of structureOverrides) {
+      const [lx, ly] = key.split(',').map(Number);
+      if (lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_SIZE) {
+        chunk.fg[ly * CHUNK_SIZE + lx] = tiles.fg;
+        chunk.bg[ly * CHUNK_SIZE + lx] = tiles.bg;
       }
     }
 

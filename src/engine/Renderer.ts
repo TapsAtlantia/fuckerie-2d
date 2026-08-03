@@ -1,5 +1,6 @@
 import { TILE_SIZE } from "../config";
-import { TILE_PROPS, TileId } from "../world/Tile";
+import { TILE_PROPS, TileId, tile, oreFleckColor } from "../world/Tile";
+import { hash2 } from "../world/Noise";
 import type { Camera } from "./Camera";
 import type { ChunkManager } from "../world/ChunkManager";
 import type { Player } from "../entities/Player";
@@ -86,8 +87,20 @@ export class Renderer {
       for (let tx = minX; tx <= maxX; tx++) {
         const bg = world.getBg(tx, ty);
         if (bg === TileId.Air) continue;
+        const sx = camera.worldToScreenX(tx * TILE_SIZE);
         ctx.fillStyle = this.bgColors[bg];
-        ctx.fillRect(camera.worldToScreenX(tx * TILE_SIZE), sy, size, size);
+        ctx.fillRect(sx, sy, size, size);
+        
+        // Simple texture for background walls (dither only)
+        const props = tile(bg);
+        if (props.texture === "dither") {
+          const h = hash2(tx, ty, 4);
+          if (h > 0.5) {
+            ctx.fillStyle = `rgba(0,0,0,0.05)`;
+            ctx.fillRect(sx, sy, size / 2, size / 2);
+            ctx.fillRect(sx + size / 2, sy + size / 2, size / 2, size / 2);
+          }
+        }
       }
     }
 
@@ -97,8 +110,7 @@ export class Renderer {
       for (let tx = minX; tx <= maxX; tx++) {
         const fg = world.getFg(tx, ty);
         if (fg === TileId.Air) continue;
-        ctx.fillStyle = this.fgColors[fg];
-        ctx.fillRect(camera.worldToScreenX(tx * TILE_SIZE), sy, size, size);
+        this.drawTile(ctx, camera, tx, ty, fg, this.fgColors[fg], size, sy);
       }
     }
 
@@ -125,6 +137,79 @@ export class Renderer {
     // remote name tags, then the cursor.
     for (const r of remotes) this.drawNameTag(camera, r);
     this.drawCursor(camera, cursor);
+  }
+
+  private drawTile(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    tx: number,
+    ty: number,
+    tileId: TileId,
+    colorStr: string,
+    size: number,
+    sy: number,
+  ): void {
+    const props = tile(tileId);
+    const sx = camera.worldToScreenX(tx * TILE_SIZE);
+    
+    // Apply hash-based tint if enabled
+    let baseColor = colorStr;
+    if (props.tint) {
+      const h = hash2(tx, ty, 0);
+      const tintFactor = 0.85 + h * 0.3; // 0.85..1.15
+      const [r, g, b] = props.color;
+      const tr = Math.min(255, Math.floor(r * tintFactor));
+      const tg = Math.min(255, Math.floor(g * tintFactor));
+      const tb = Math.min(255, Math.floor(b * tintFactor));
+      baseColor = `rgb(${tr},${tg},${tb})`;
+    }
+
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(sx, sy, size, size);
+
+    // Apply texture style
+    switch (props.texture) {
+      case "dither": {
+        const h = hash2(tx, ty, 1);
+        if (h > 0.5) {
+          ctx.fillStyle = `rgba(0,0,0,0.08)`;
+          ctx.fillRect(sx, sy, size / 2, size / 2);
+          ctx.fillRect(sx + size / 2, sy + size / 2, size / 2, size / 2);
+        }
+        break;
+      }
+      case "twoTone": {
+        // Top highlight for logs/grass
+        ctx.fillStyle = `rgba(255,255,255,0.15)`;
+        ctx.fillRect(sx, sy, size, size * 0.25);
+        break;
+      }
+      case "fleck": {
+        const fleckColor = oreFleckColor(tileId);
+        if (fleckColor) {
+          const h = hash2(tx, ty, 2);
+          const fx = sx + (h * size * 0.6 + size * 0.2);
+          const fy = sy + ((h * 7 % 1) * size * 0.6 + size * 0.2);
+          const fsize = size * 0.25;
+          ctx.fillStyle = `rgb(${fleckColor[0]},${fleckColor[1]},${fleckColor[2]})`;
+          ctx.fillRect(fx, fy, fsize, fsize);
+        } else {
+          // Generic fleck for non-ore blocks
+          const h = hash2(tx, ty, 3);
+          if (h > 0.6) {
+            ctx.fillStyle = `rgba(0,0,0,0.12)`;
+            const fx = sx + (h * size * 0.7 + size * 0.15);
+            const fy = sy + ((h * 11 % 1) * size * 0.7 + size * 0.15);
+            ctx.fillRect(fx, fy, size * 0.2, size * 0.2);
+          }
+        }
+        break;
+      }
+      case "flat":
+      default:
+        // Already drawn as flat fill
+        break;
+    }
   }
 
   private drawPlayer(camera: Camera, player: Player): void {

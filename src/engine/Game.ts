@@ -1,4 +1,4 @@
-import { BAND, DEFAULT_SEED, PLAYER_W, REACH_TILES, TILE_SIZE } from "../config";
+import { BAND, DEFAULT_SEED, DEFAULT_CREATIVE, PLAYER_W, REACH_TILES, TILE_SIZE, INVENTORY } from "../config";
 import { Camera } from "./Camera";
 import { Input } from "./Input";
 import { Renderer, type CursorInfo } from "./Renderer";
@@ -11,6 +11,9 @@ import { TileId, isSolid, tile } from "../world/Tile";
 import type { Profile } from "../Profile";
 import type { Net } from "../net/Net";
 import type { NetMessage } from "../net/Protocol";
+import { Inventory } from "../player/Inventory";
+import { InventoryUI } from "../ui/InventoryUI";
+import { itemFromTile } from "../items/Item";
 
 const STEP = 1 / 60;
 const MAX_STEPS = 5;
@@ -18,7 +21,11 @@ const MINE_SPEED = 1.4;
 const STATE_HZ = 15; // how often we broadcast our avatar state
 const WELCOME_TIMEOUT = 9000;
 
-const HOTBAR: readonly TileId[] = [TileId.Dirt, TileId.Stone, TileId.Grass, TileId.Torch];
+// Default hotbar items for new games
+const DEFAULT_HOTBAR: readonly TileId[] = [
+  TileId.Dirt, TileId.Stone, TileId.Grass, TileId.Torch, TileId.Planks,
+  TileId.Cobblestone, TileId.Sand, TileId.OakLog, TileId.Glass, TileId.Lantern
+];
 
 export type GameMode = "single" | "host" | "client";
 
@@ -69,6 +76,11 @@ export class Game {
   private fps = 0;
   private hudTimer = 0;
 
+  // Inventory system
+  private inventory: Inventory;
+  private inventoryUI: InventoryUI;
+  private creative: boolean = DEFAULT_CREATIVE;
+
   constructor(canvas: HTMLCanvasElement, opts: GameOptions) {
     this.opts = opts;
     this.mode = opts.mode;
@@ -82,6 +94,14 @@ export class Game {
     if (!hud) throw new Error("#hud element missing");
     this.hud = hud;
 
+    // Initialize inventory system
+    this.inventory = new Inventory(this.creative);
+    this.inventory.setCreative(this.creative);
+    this.inventoryUI = new InventoryUI(this.inventory);
+    
+    // Set up default hotbar
+    this.setupDefaultHotbar();
+
     if (this.net) {
       this.net.onMessage = (m) => this.handleNet(m);
       if (this.mode === "host") {
@@ -91,6 +111,14 @@ export class Game {
           deltas: this.world.exportDeltas(),
         });
       }
+    }
+  }
+
+  private setupDefaultHotbar(): void {
+    for (let i = 0; i < DEFAULT_HOTBAR.length; i++) {
+      const tileId = DEFAULT_HOTBAR[i];
+      const item = itemFromTile(tileId);
+      this.inventory.setHotbarSlot(i, { item, count: this.creative ? INVENTORY.MAX_STACK_SIZE : INVENTORY.DEFAULT_STACK_SIZE });
     }
   }
 
@@ -127,6 +155,11 @@ export class Game {
     this.started = true;
     this.renderer.resize(this.camera);
     this.streamChunks();
+    
+    // Add hotbar to DOM
+    const hotbarEl = this.inventoryUI.getHotbarElement();
+    document.body.appendChild(hotbarEl);
+    
     this.lastTime = performance.now();
     this.opts.onStarted?.();
     this.rafId = requestAnimationFrame(this.frame);
@@ -138,6 +171,13 @@ export class Game {
     this.started = false;
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.net?.leave();
+    this.inventoryUI.close();
+    
+    // Remove hotbar from DOM
+    const hotbarEl = this.inventoryUI.getHotbarElement();
+    if (hotbarEl.parentNode) {
+      hotbarEl.parentNode.removeChild(hotbarEl);
+    }
   }
 
   /** Tear down and return to the menu. */
@@ -266,13 +306,30 @@ export class Game {
     if (inp.wasPressed("y")) this.player.warp(0, -2000);
     // Reseed only makes sense in singleplayer — it would desync a shared world.
     if (inp.wasPressed("g") && this.mode === "single") this.reseed();
-    if (inp.wasPressed("escape")) this.leave();
+    if (inp.wasPressed("escape")) {
+      this.inventoryUI.close();
+      this.leave();
+    }
+    
+    // Toggle inventory
+    if (inp.wasPressed("e")) {
+      this.inventoryUI.toggle();
+      this.inventoryUI.updateFullInventory();
+    }
 
-    for (let i = 0; i < HOTBAR.length; i++) {
-      if (inp.wasPressed(String(i + 1))) this.selected = i;
+    // Hotbar selection
+    for (let i = 0; i < 10; i++) {
+      if (inp.wasPressed(String(i === 9 ? 0 : i + 1))) {
+        this.inventory.setSelectedIndex(i);
+        this.inventoryUI.updateHotbar();
+      }
     }
     const wheel = inp.consumeWheel();
-    if (wheel !== 0) this.selected = (this.selected + wheel + HOTBAR.length) % HOTBAR.length;
+    if (wheel !== 0) {
+      const newIndex = (this.inventory.getSelectedIndex() + wheel + 10) % 10;
+      this.inventory.setSelectedIndex(newIndex);
+      this.inventoryUI.updateHotbar();
+    }
   }
 
   private reseed(): void {
@@ -321,6 +378,17 @@ export class Game {
     this.cursor.mining = true;
     this.cursor.miningProgress = Math.min(1, this.mineTimer / hardness);
     if (this.mineTimer >= hardness) {
+      // Survival: add drop to inventory
+      if (!this.creative) {
+        const props = tile(fg);
+        const dropTileId = props.drop ?? fg;
+        if (dropTileId !== null) {
+          const item = itemFromTile(dropTileId);
+          this.inventory.addItem(item, 1);
+          this.inventoryUI.updateHotbar();
+        }
+      }
+      
       this.world.setFg(tileX, tileY, TileId.Air);
       this.broadcastEdit(tileX, tileY, TileId.Air);
       this.mineTimer = 0;
@@ -330,7 +398,15 @@ export class Game {
 
   private place(tileX: number, tileY: number): void {
     if (this.world.getFg(tileX, tileY) !== TileId.Air) return;
-    const id = HOTBAR[this.selected];
+    
+    const tileId = this.inventory.getSelectedTile();
+    if (tileId === null) return;
+    
+    // Survival: check if we have the item
+    if (!this.creative) {
+      if (!this.inventory.hasSelected(tileId, 1)) return;
+    }
+    
     const supported =
       this.world.isSolid(tileX - 1, tileY) ||
       this.world.isSolid(tileX + 1, tileY) ||
@@ -338,10 +414,16 @@ export class Game {
       this.world.isSolid(tileX, tileY + 1) ||
       this.world.getBg(tileX, tileY) !== TileId.Air;
     if (!supported) return;
-    if (isSolid(id) && this.tileOverlapsPlayer(tileX, tileY)) return;
+    if (isSolid(tileId) && this.tileOverlapsPlayer(tileX, tileY)) return;
 
-    this.world.setFg(tileX, tileY, id);
-    this.broadcastEdit(tileX, tileY, id);
+    // Survival: consume the item
+    if (!this.creative) {
+      this.inventory.consumeSelected(1);
+      this.inventoryUI.updateHotbar();
+    }
+
+    this.world.setFg(tileX, tileY, tileId);
+    this.broadcastEdit(tileX, tileY, tileId);
   }
 
   private tileOverlapsPlayer(tileX: number, tileY: number): boolean {
@@ -382,17 +464,24 @@ export class Game {
   private updateHud(): void {
     const px = Math.floor(this.player.centerX / TILE_SIZE);
     const py = Math.floor(this.player.centerY / TILE_SIZE);
-    const sel = tile(HOTBAR[this.selected]).name;
+    
+    const selectedSlot = this.inventory.getSelected();
+    const selName = selectedSlot ? selectedSlot.item.name : "empty";
+    const selCount = selectedSlot ? selectedSlot.count : 0;
+    
     let netLine = "solo";
     if (this.net) {
       const label = this.mode === "host" ? "hosting" : "joined";
       netLine = `${label} · ${this.net.peerCount()} peer(s)`;
     }
+    
+    const modeLabel = this.creative ? "CREATIVE" : "SURVIVAL";
+    
     this.hud.textContent =
-      `fuckerie 2d — Phase 1\n` +
+      `fuckerie 2d — Phase 2\n` +
       `${this.profile.name}   [${netLine}]\n` +
       `fps ${this.fps.toFixed(0)}   chunks ${this.world.loadedCount}\n` +
       `pos ${px}, ${py}   band ${this.bandName(py)}\n` +
-      `block [${this.selected + 1}] ${sel}${this.player.fly ? "   FLY" : ""}   ·  Esc: menu`;
+      `${modeLabel}   [${this.inventory.getSelectedIndex() + 1}] ${selName} (${selCount})${this.player.fly ? "   FLY" : ""}   ·  Esc: menu`;
   }
 }

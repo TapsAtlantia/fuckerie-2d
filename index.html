@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>fuckerie 2d — Phase 1</title>
+    <title>fuckerie 2d — Phase 2</title>
     <style>
       :root { color-scheme: dark; }
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -38,6 +38,113 @@
         user-select: none;
       }
       #game:focus { outline: none; }
+
+      /* ---- Hotbar ---- */
+      .hotbar {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 4px;
+        padding: 8px;
+        background: rgba(8, 12, 24, 0.85);
+        border: 1px solid rgba(120, 160, 220, 0.3);
+        border-radius: 12px;
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+      }
+      .inventory-slot {
+        width: 40px;
+        height: 40px;
+        position: relative;
+        background: rgba(0, 0, 0, 0.4);
+        border: 2px solid rgba(100, 140, 200, 0.2);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .inventory-slot.selected {
+        border-color: #6cc4ff;
+        box-shadow: 0 0 8px rgba(108, 196, 255, 0.5);
+      }
+      .inventory-slot-icon {
+        width: 32px;
+        height: 32px;
+        image-rendering: pixelated;
+      }
+      .inventory-slot-count {
+        position: absolute;
+        bottom: 2px;
+        right: 2px;
+        font: 11px ui-monospace, Consolas, monospace;
+        color: #fff;
+        text-shadow: 0 1px 2px #000;
+        font-weight: 700;
+      }
+      .inventory-slot-key {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        font: 10px ui-monospace, Consolas, monospace;
+        color: rgba(255, 255, 255, 0.6);
+        text-shadow: 0 1px 2px #000;
+      }
+
+      /* ---- Full inventory overlay ---- */
+      .full-inventory {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(4, 6, 12, 0.85);
+        backdrop-filter: blur(4px);
+      }
+      .inventory-section {
+        background: rgba(15, 21, 34, 0.9);
+        border: 1px solid rgba(120, 160, 220, 0.2);
+        border-radius: 12px;
+        padding: 16px;
+        margin: 8px;
+      }
+      .inventory-section-title {
+        font: 14px ui-monospace, Consolas, monospace;
+        color: #9fb0cf;
+        margin-bottom: 12px;
+        text-align: center;
+      }
+      .inventory-grid {
+        display: grid;
+        grid-template-columns: repeat(10, 40px);
+        gap: 4px;
+      }
+      .inventory-slot {
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .inventory-slot:hover {
+        border-color: rgba(108, 196, 255, 0.6);
+      }
+      .inventory-toggle {
+        display: flex;
+        justify-content: center;
+        margin-top: 12px;
+      }
+      .inventory-toggle-btn {
+        padding: 8px 16px;
+        background: rgba(108, 196, 255, 0.2);
+        border: 1px solid rgba(108, 196, 255, 0.4);
+        border-radius: 8px;
+        color: #dbe3f4;
+        font: 13px ui-monospace, Consolas, monospace;
+        cursor: pointer;
+      }
+      .inventory-toggle-btn:hover {
+        background: rgba(108, 196, 255, 0.3);
+      }
 
       /* ---- Menu overlay (home / profile / multiplayer) ---- */
       #menu {
@@ -142,8 +249,8 @@
     <div id="menu"></div>
     <div id="hud"></div>
     <div id="help">
-      WASD/Arrows move · Space jump · L-click mine · R-click place · 1-4 select block ·
-      F fly · T warp down 2000 · Y warp up 2000 · G regen seed
+      WASD/Arrows move · Space jump · L-click mine · R-click place · 1-0 select block ·
+      E inventory · F fly · T warp down 2000 · Y warp up 2000 · G regen seed
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

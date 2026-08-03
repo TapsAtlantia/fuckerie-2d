@@ -1,9 +1,9 @@
 {
   "name": "fuckerie-2d",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Hybrid 2D sandbox engine (Terraria core + Mindustry/Minecraft/Stardew) — Phase 1 prototype",
+  "description": "Hybrid 2D sandbox engine (Terraria core + Mindustry/Minecraft/Stardew) — Phase 2: World Generation Deep-Dive + Inventory",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
