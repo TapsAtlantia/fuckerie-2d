@@ -76,10 +76,9 @@ export class Game {
   private fps = 0;
   private hudTimer = 0;
 
-  // Inventory system
+  // Inventory system (its `isCreative` is the single source of truth for game mode)
   private inventory: Inventory;
   private inventoryUI: InventoryUI;
-  private creative: boolean = DEFAULT_CREATIVE;
 
   constructor(canvas: HTMLCanvasElement, opts: GameOptions) {
     this.opts = opts;
@@ -95,8 +94,7 @@ export class Game {
     this.hud = hud;
 
     // Initialize inventory system
-    this.inventory = new Inventory(this.creative);
-    this.inventory.setCreative(this.creative);
+    this.inventory = new Inventory(DEFAULT_CREATIVE);
     this.inventoryUI = new InventoryUI(this.inventory);
     
     // Set up default hotbar
@@ -118,7 +116,7 @@ export class Game {
     for (let i = 0; i < DEFAULT_HOTBAR.length; i++) {
       const tileId = DEFAULT_HOTBAR[i];
       const item = itemFromTile(tileId);
-      this.inventory.setHotbarSlot(i, { item, count: this.creative ? INVENTORY.MAX_STACK_SIZE : INVENTORY.DEFAULT_STACK_SIZE });
+      this.inventory.setHotbarSlot(i, { item, count: this.inventory.isCreative ? INVENTORY.MAX_STACK_SIZE : INVENTORY.DEFAULT_STACK_SIZE });
     }
   }
 
@@ -272,9 +270,15 @@ export class Game {
     }
 
     this.computeLighting();
-    this.renderer.render(this.camera, this.world, this.player, this.lighting, this.cursor, [
-      ...this.remote.values(),
-    ]);
+    this.renderer.render(
+      this.camera,
+      this.world,
+      this.player,
+      this.lighting,
+      this.cursor,
+      [...this.remote.values()],
+      dt,
+    );
 
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.1;
     this.hudTimer += dt;
@@ -379,7 +383,7 @@ export class Game {
     this.cursor.miningProgress = Math.min(1, this.mineTimer / hardness);
     if (this.mineTimer >= hardness) {
       // Survival: add drop to inventory
-      if (!this.creative) {
+      if (!this.inventory.isCreative) {
         const props = tile(fg);
         const dropTileId = props.drop ?? fg;
         if (dropTileId !== null) {
@@ -403,7 +407,7 @@ export class Game {
     if (tileId === null) return;
     
     // Survival: check if we have the item
-    if (!this.creative) {
+    if (!this.inventory.isCreative) {
       if (!this.inventory.hasSelected(tileId, 1)) return;
     }
     
@@ -417,7 +421,7 @@ export class Game {
     if (isSolid(tileId) && this.tileOverlapsPlayer(tileX, tileY)) return;
 
     // Survival: consume the item
-    if (!this.creative) {
+    if (!this.inventory.isCreative) {
       this.inventory.consumeSelected(1);
       this.inventoryUI.updateHotbar();
     }
@@ -475,7 +479,7 @@ export class Game {
       netLine = `${label} · ${this.net.peerCount()} peer(s)`;
     }
     
-    const modeLabel = this.creative ? "CREATIVE" : "SURVIVAL";
+    const modeLabel = this.inventory.isCreative ? "CREATIVE" : "SURVIVAL";
     
     this.hud.textContent =
       `fuckerie 2d — Phase 2\n` +

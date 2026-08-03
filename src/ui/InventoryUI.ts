@@ -107,7 +107,7 @@ export class InventoryUI {
     toggleSection.innerHTML = `
       <div class='inventory-toggle'>
         <button id='creative-toggle' class='inventory-toggle-btn'>
-          ${this.inventory['creative'] ? 'Creative: ON' : 'Creative: OFF'}
+          ${this.inventory.isCreative ? 'Creative: ON' : 'Creative: OFF'}
         </button>
       </div>
     `;
@@ -117,7 +117,7 @@ export class InventoryUI {
     const toggleBtn = this.fullInventoryElement.querySelector('#creative-toggle') as HTMLButtonElement;
     if (toggleBtn) {
       toggleBtn.onclick = () => {
-        this.inventory.setCreative(!this.inventory['creative']);
+        this.inventory.setCreative(!this.inventory.isCreative);
         this.updateFullInventory();
       };
     }
@@ -152,7 +152,7 @@ export class InventoryUI {
       if (clickable) {
         slot.onclick = () => {
           // For creative mode, clicking selects the item
-          if (this.inventory['creative']) {
+          if (this.inventory.isCreative) {
             // Find the hotbar slot with this item or empty slot
             const hotbarSlots = this.inventory.getHotbar();
             let targetIndex = -1;

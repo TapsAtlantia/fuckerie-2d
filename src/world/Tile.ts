@@ -207,3 +207,49 @@ export function oreFleckColor(tileId: TileId): readonly [number, number, number]
     default: return null;
   }
 }
+
+// --- Phase A: rendering + lighting classification helpers ------------------
+// Kept as functions (not per-entry fields) so we don't have to touch all 57 TILE_PROPS rows.
+
+/** Light opacity of a foreground tile: 0 = fully transparent, 1 = fully blocking. */
+export function fgOpacity(id: number): number {
+  if (id === TileId.Air) return 0;
+  if (id === TileId.Glass) return 0.1; // windows pass most light
+  if (id >= TileId.OakLeaves && id <= TileId.JungleLeaves) return 0.55; // canopies dapple light
+  if (!isSolid(id)) return 0.05; // deco/plants barely occlude
+  return 1;
+}
+
+/** Opacity contribution of a background wall (when the foreground is empty). */
+export const WALL_OPACITY = 0.15;
+
+/** Blocks that grow a fringe of strands/moss/snow over their top edge. */
+export function hasOverhang(id: number): boolean {
+  return (
+    id === TileId.Grass ||
+    id === TileId.SnowyGrass ||
+    id === TileId.JungleGrass ||
+    id === TileId.Podzol ||
+    id === TileId.MossyStone
+  );
+}
+
+/** Colour of the overhang fringe for a given top block. */
+export function overhangColor(id: number): readonly [number, number, number] {
+  if (id === TileId.SnowyGrass) return [250, 250, 255];
+  if (id === TileId.JungleGrass) return [78, 156, 54];
+  if (id === TileId.MossyStone) return [96, 128, 72];
+  return [104, 186, 74]; // grass / podzol green
+}
+
+/** Tiles that should render as smoothed 45° slopes on exposed hill edges. */
+export function canSlope(id: number): boolean {
+  if (!isSolid(id)) return false;
+  const c = TILE_PROPS[id]?.category;
+  return c === "natural" || c === "stone" || c === "sand" || c === "ice";
+}
+
+/** Whether a tile connects (for auto-tiling edge detection) — any solid block. */
+export function connectsForAutotile(id: number): boolean {
+  return isSolid(id);
+}

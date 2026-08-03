@@ -5,7 +5,7 @@ import {
   TORCH,
   TORCH_STRENGTH,
 } from "../config";
-import { TILE_PROPS, isSolid } from "../world/Tile";
+import { TILE_PROPS, TileId, WALL_OPACITY, fgOpacity } from "../world/Tile";
 import type { ChunkManager } from "../world/ChunkManager";
 
 // Smooth 2D light propagation over the visible tile region, recomputed each frame.
@@ -28,7 +28,7 @@ export class Lighting {
   private r = new Int16Array(0);
   private g = new Int16Array(0);
   private b = new Int16Array(0);
-  private solid = new Uint8Array(0);
+  private opacity = new Float32Array(0); // 0 = transparent, 1 = fully blocking
   private queue: number[] = [];
 
   constructor() {
@@ -48,7 +48,7 @@ export class Lighting {
     this.r = new Int16Array(area);
     this.g = new Int16Array(area);
     this.b = new Int16Array(area);
-    this.solid = new Uint8Array(area);
+    this.opacity = new Float32Array(area);
     this.image = this.ctx.createImageData(w, h);
   }
 
@@ -69,7 +69,7 @@ export class Lighting {
     this.originTileX = minTileX;
     this.originTileY = minTileY;
 
-    const { r, g, b, solid } = this;
+    const { r, g, b, opacity } = this;
     r.fill(0);
     g.fill(0);
     b.fill(0);
@@ -80,22 +80,30 @@ export class Lighting {
     const dayG = DAYLIGHT[1] * dayLevel;
     const dayB = DAYLIGHT[2] * dayLevel;
 
-    // Single scan: build solid mask, seed skylight down open columns, seed emitter tiles.
+    // Single scan per column: compute per-tile opacity, pour skylight down (attenuating through
+    // glass/walls, blocked by solids), and seed emitter tiles.
     for (let x = 0; x < w; x++) {
-      let skyOpen = true;
+      let skyLevel = 1; // fraction of daylight still reaching down this column
       for (let y = 0; y < h; y++) {
         const i = y * w + x;
         const fg = world.getFg(minTileX + x, minTileY + y);
-        const s = isSolid(fg);
-        solid[i] = s ? 1 : 0;
 
-        if (skyOpen && !s) {
-          r[i] = dayR;
-          g[i] = dayG;
-          b[i] = dayB;
+        // Opacity: foreground tile, or the background wall if the foreground is empty.
+        let o: number;
+        if (fg === TileId.Air) {
+          o = world.getBg(minTileX + x, minTileY + y) !== TileId.Air ? WALL_OPACITY : 0;
+        } else {
+          o = fgOpacity(fg);
+        }
+        opacity[i] = o;
+
+        if (skyLevel > 0.03) {
+          r[i] = dayR * skyLevel;
+          g[i] = dayG * skyLevel;
+          b[i] = dayB * skyLevel;
           queue.push(i);
         }
-        if (s) skyOpen = false;
+        skyLevel *= 1 - o; // light passing to the tile below
 
         const emit = TILE_PROPS[fg]?.lightEmit ?? 0;
         if (emit > 0) {
@@ -161,7 +169,9 @@ export class Lighting {
     cb: number,
     queue: number[],
   ): void {
-    const loss = this.solid[ni] ? LIGHT_ATTEN_SOLID : LIGHT_ATTEN_AIR;
+    // Light loses more entering an opaque tile: air ≈ base loss, solid ≈ full loss, glass/walls
+    // in between (so windows and rooms glow rather than going pitch black).
+    const loss = LIGHT_ATTEN_AIR + this.opacity[ni] * (LIGHT_ATTEN_SOLID - LIGHT_ATTEN_AIR);
     const nr = cr - loss;
     const ng = cg - loss;
     const nb = cb - loss;

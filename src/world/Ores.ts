@@ -59,8 +59,8 @@ export class OreSystem {
     // Hash the lattice cell to determine vein properties
     const cellHash = hash2(latticeX, latticeY, this.seed);
     
-    // Only some lattice cells have veins
-    if (cellHash > 0.65) return null; // 35% of cells have veins
+    // Only some lattice cells have veins (hash in [0,1); keep ~14% for sparse ore).
+    if (cellHash < 0.86) return null;
 
     // Determine ore type for this vein (based on cell hash + biome weighting)
     const oreType = this.selectOreType(applicableOres, cellHash, biome);
@@ -145,13 +145,13 @@ export class OreSystem {
     const dy = worldY - centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     
-    // Vein radius varies by hash
-    const maxRadius = 3 + (veinHash * 4); // 3-7 tiles radius
-    
-    // Noise-jittered shape (not perfect circle)
+    // Small vein radius so ore stays a few % of stone (not a rainbow).
+    const maxRadius = 1.1 + veinHash * 1.6; // ~1.1-2.7 tiles
+
+    // Noise-jittered shape (not a perfect circle)
     const shapeNoise = hash2(Math.floor(worldX), Math.floor(worldY), this.seed + 999);
-    const radius = maxRadius * (0.7 + shapeNoise * 0.6);
-    
+    const radius = maxRadius * (0.65 + shapeNoise * 0.45);
+
     return dist < radius;
   }
 }

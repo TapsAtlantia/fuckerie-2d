@@ -1,6 +1,24 @@
-import { TILE_SIZE } from "../config";
-import { TILE_PROPS, TileId, tile, oreFleckColor } from "../world/Tile";
+import {
+  BEVEL_DARK,
+  BEVEL_LIGHT,
+  OVERHANG_PX,
+  SPRITE_VARIANTS,
+  TILE_SIZE,
+  WALL_DARKEN,
+} from "../config";
+import {
+  TileId,
+  canSlope,
+  connectsForAutotile,
+  hasOverhang,
+  isSolid,
+  overhangColor,
+} from "../world/Tile";
 import { hash2 } from "../world/Noise";
+import { shapeFrom } from "../render/Autotile";
+import { TileSprites } from "../render/TileSprites";
+import { Parallax } from "../render/Parallax";
+import { Particles } from "../render/Particles";
 import type { Camera } from "./Camera";
 import type { ChunkManager } from "../world/ChunkManager";
 import type { Player } from "../entities/Player";
@@ -11,38 +29,29 @@ export interface CursorInfo {
   tileX: number;
   tileY: number;
   inReach: boolean;
-  miningProgress: number; // 0..1, only meaningful while mining
+  miningProgress: number;
   mining: boolean;
 }
 
-const SKY_COLOR = "#6ba7ec";
-
-// Draws the world in ordered layers: sky → background walls (dim) → foreground tiles →
-// player → lightmap (multiply) → cursor/mining overlay (full brightness, on top of light).
+// Draws the world as a 5-tier composite: parallax backdrop → background walls → foreground
+// tiles (auto-tiled, sloped, beveled, with overhang fringe) → players → lightmap (multiply) →
+// ambient particles + cursor/UI. Foreground/wall tiles use procedurally generated pixel sprites.
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private dpr = 1;
 
-  // Precomputed colour strings so we don't build "rgb(...)" per tile per frame.
-  private fgColors: string[] = [];
-  private bgColors: string[] = [];
+  private sprites = new TileSprites();
+  private parallax = new Parallax();
+  private particles = new Particles();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("2D canvas context unavailable");
     this.ctx = ctx;
-
-    for (const p of TILE_PROPS) {
-      const [r, g, b] = p.color;
-      this.fgColors.push(`rgb(${r},${g},${b})`);
-      // Background walls are the same material rendered darker for depth separation.
-      this.bgColors.push(`rgb(${(r * 0.42) | 0},${(g * 0.42) | 0},${(b * 0.46) | 0})`);
-    }
   }
 
-  /** Match the drawing buffer to the CSS size × device pixel ratio. */
   resize(camera: Camera): void {
     const dpr = window.devicePixelRatio || 1;
     const cssW = this.canvas.clientWidth;
@@ -54,7 +63,6 @@ export class Renderer {
       this.canvas.height = bh;
       this.dpr = dpr;
     }
-    // Draw in CSS-pixel space regardless of DPR.
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     camera.setViewport(cssW, cssH);
   }
@@ -66,59 +74,52 @@ export class Renderer {
     lighting: Lighting,
     cursor: CursorInfo,
     remotes: RemotePlayer[] = [],
+    dt = 0,
   ): void {
     const ctx = this.ctx;
     const zoom = camera.zoom;
-    const size = TILE_SIZE * zoom + 1; // +1 hides sub-pixel seams between tiles
+    const size = TILE_SIZE * zoom;
+    const draw = Math.ceil(size) + 1;
 
-    // Sky backdrop (only visible where nothing is drawn over it, i.e. open air).
-    ctx.fillStyle = SKY_COLOR;
-    ctx.fillRect(0, 0, camera.viewW, camera.viewH);
+    // TIER 1: parallax backdrop.
+    this.parallax.draw(ctx, camera);
 
     const b = camera.tileBounds();
-    const minX = b.minX - 1;
-    const minY = b.minY - 1;
-    const maxX = b.maxX + 1;
-    const maxY = b.maxY + 1;
+    const minX = b.minX - 1, minY = b.minY - 1, maxX = b.maxX + 1, maxY = b.maxY + 1;
 
-    // Background walls.
+    ctx.imageSmoothingEnabled = false;
+
+    // TIER 2: background walls (only where the foreground doesn't already cover them).
     for (let ty = minY; ty <= maxY; ty++) {
       const sy = camera.worldToScreenY(ty * TILE_SIZE);
       for (let tx = minX; tx <= maxX; tx++) {
         const bg = world.getBg(tx, ty);
         if (bg === TileId.Air) continue;
+        const fg = world.getFg(tx, ty);
+        if (fg !== TileId.Air && fg !== TileId.Glass) continue; // wall hidden behind a block
         const sx = camera.worldToScreenX(tx * TILE_SIZE);
-        ctx.fillStyle = this.bgColors[bg];
-        ctx.fillRect(sx, sy, size, size);
-        
-        // Simple texture for background walls (dither only)
-        const props = tile(bg);
-        if (props.texture === "dither") {
-          const h = hash2(tx, ty, 4);
-          if (h > 0.5) {
-            ctx.fillStyle = `rgba(0,0,0,0.05)`;
-            ctx.fillRect(sx, sy, size / 2, size / 2);
-            ctx.fillRect(sx + size / 2, sy + size / 2, size / 2, size / 2);
-          }
-        }
+        const sprite = this.sprites.get(bg, this.variantAt(tx, ty));
+        if (sprite) ctx.drawImage(sprite, sx, sy, draw, draw);
+        ctx.fillStyle = `rgba(6,8,16,${1 - WALL_DARKEN})`;
+        ctx.fillRect(sx, sy, draw, draw);
       }
     }
 
-    // Foreground tiles.
+    // TIER 3: foreground tiles.
     for (let ty = minY; ty <= maxY; ty++) {
       const sy = camera.worldToScreenY(ty * TILE_SIZE);
       for (let tx = minX; tx <= maxX; tx++) {
         const fg = world.getFg(tx, ty);
         if (fg === TileId.Air) continue;
-        this.drawTile(ctx, camera, tx, ty, fg, this.fgColors[fg], size, sy);
+        this.drawFg(ctx, camera, world, tx, ty, fg, sy, size, draw);
       }
     }
 
-    // Players (remote peers, then the local player on top).
+    // Players.
     for (const r of remotes) this.drawAvatar(camera, r.x, r.y, r.w, r.h, r.facing, r.color);
     this.drawPlayer(camera, player);
 
-    // Lightmap: multiply the lit region over everything drawn so far.
+    // TIER 4: lightmap (multiply).
     const lm = lighting.canvas;
     if (lm.width > 0 && lm.height > 0) {
       ctx.imageSmoothingEnabled = true;
@@ -133,82 +134,109 @@ export class Renderer {
       ctx.globalCompositeOperation = "source-over";
     }
 
-    // Overlays drawn on top of lighting so they stay readable in the dark:
-    // remote name tags, then the cursor.
+    // TIER 5: ambient particles + overlays (full brightness, above lighting).
+    if (dt > 0) this.particles.update(dt, camera);
+    this.particles.draw(ctx, camera);
     for (const r of remotes) this.drawNameTag(camera, r);
     this.drawCursor(camera, cursor);
   }
 
-  private drawTile(
+  private variantAt(tx: number, ty: number): number {
+    return (hash2(tx, ty, 0) * SPRITE_VARIANTS) | 0;
+  }
+
+  private drawFg(
     ctx: CanvasRenderingContext2D,
     camera: Camera,
+    world: ChunkManager,
     tx: number,
     ty: number,
-    tileId: TileId,
-    colorStr: string,
-    size: number,
+    fg: number,
     sy: number,
+    size: number,
+    draw: number,
   ): void {
-    const props = tile(tileId);
     const sx = camera.worldToScreenX(tx * TILE_SIZE);
-    
-    // Apply hash-based tint if enabled
-    let baseColor = colorStr;
-    if (props.tint) {
-      const h = hash2(tx, ty, 0);
-      const tintFactor = 0.85 + h * 0.3; // 0.85..1.15
-      const [r, g, b] = props.color;
-      const tr = Math.min(255, Math.floor(r * tintFactor));
-      const tg = Math.min(255, Math.floor(g * tintFactor));
-      const tb = Math.min(255, Math.floor(b * tintFactor));
-      baseColor = `rgb(${tr},${tg},${tb})`;
+    const sprite = this.sprites.get(fg, this.variantAt(tx, ty));
+    if (!sprite) return;
+
+    // Non-solid deco (plants, torches): draw inset so they read as small props, no bevels.
+    if (!isSolid(fg)) {
+      const inx = size * 0.16;
+      const iny = size * 0.28;
+      ctx.drawImage(sprite, sx + inx, sy + iny, size - inx * 2, size - iny);
+      return;
     }
 
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(sx, sy, size, size);
+    const tS = connectsForAutotile(world.getFg(tx, ty - 1));
+    const rS = connectsForAutotile(world.getFg(tx + 1, ty));
+    const bS = connectsForAutotile(world.getFg(tx, ty + 1));
+    const lS = connectsForAutotile(world.getFg(tx - 1, ty));
+    const shape = shapeFrom(tS, rS, bS, lS, canSlope(fg));
 
-    // Apply texture style
-    switch (props.texture) {
-      case "dither": {
-        const h = hash2(tx, ty, 1);
-        if (h > 0.5) {
-          ctx.fillStyle = `rgba(0,0,0,0.08)`;
-          ctx.fillRect(sx, sy, size / 2, size / 2);
-          ctx.fillRect(sx + size / 2, sy + size / 2, size / 2, size / 2);
-        }
-        break;
+    if (shape.slope !== "none") {
+      ctx.save();
+      ctx.beginPath();
+      if (shape.slope === "left") {
+        // keep lower-right triangle (cut top-left)
+        ctx.moveTo(sx, sy + size);
+        ctx.lineTo(sx + size, sy + size);
+        ctx.lineTo(sx + size, sy);
+      } else {
+        // keep lower-left triangle (cut top-right)
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx, sy + size);
+        ctx.lineTo(sx + size, sy + size);
       }
-      case "twoTone": {
-        // Top highlight for logs/grass
-        ctx.fillStyle = `rgba(255,255,255,0.15)`;
-        ctx.fillRect(sx, sy, size, size * 0.25);
-        break;
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(sprite, sx, sy, draw, draw);
+      ctx.restore();
+      // Highlight the sloped edge.
+      ctx.strokeStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
+      ctx.lineWidth = Math.max(1, size * 0.1);
+      ctx.beginPath();
+      if (shape.slope === "left") { ctx.moveTo(sx, sy + size); ctx.lineTo(sx + size, sy); }
+      else { ctx.moveTo(sx, sy); ctx.lineTo(sx + size, sy + size); }
+      ctx.stroke();
+      return;
+    }
+
+    ctx.drawImage(sprite, sx, sy, draw, draw);
+
+    // Edge bevels where exposed to open space.
+    const bev = Math.max(1, Math.round(size * 0.14));
+    if (shape.top) {
+      ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
+      ctx.fillRect(sx, sy, size, bev);
+    }
+    if (shape.left) {
+      ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT * 0.7})`;
+      ctx.fillRect(sx, sy, bev, size);
+    }
+    if (shape.bottom) {
+      ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK})`;
+      ctx.fillRect(sx, sy + size - bev, size, bev);
+    }
+    if (shape.right) {
+      ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK * 0.7})`;
+      ctx.fillRect(sx + size - bev, sy, bev, size);
+    }
+
+    // Overhang fringe over an exposed grassy/snowy/mossy top.
+    if (shape.top && hasOverhang(fg)) {
+      const oc = overhangColor(fg);
+      ctx.fillStyle = `rgb(${oc[0]},${oc[1]},${oc[2]})`;
+      const ohMax = (OVERHANG_PX / 16) * size;
+      const strands = Math.max(3, Math.round(size / 5));
+      const sw = Math.max(1, size / (strands * 1.6));
+      for (let k = 0; k < strands; k++) {
+        const hx = hash2(tx * 13 + k, ty, 51);
+        const hh = hash2(tx, ty * 7 + k, 52);
+        const px = sx + hx * (size - sw);
+        const ph = ohMax * (0.45 + hh * 0.55);
+        ctx.fillRect(px, sy - ph, sw, ph);
       }
-      case "fleck": {
-        const fleckColor = oreFleckColor(tileId);
-        if (fleckColor) {
-          const h = hash2(tx, ty, 2);
-          const fx = sx + (h * size * 0.6 + size * 0.2);
-          const fy = sy + ((h * 7 % 1) * size * 0.6 + size * 0.2);
-          const fsize = size * 0.25;
-          ctx.fillStyle = `rgb(${fleckColor[0]},${fleckColor[1]},${fleckColor[2]})`;
-          ctx.fillRect(fx, fy, fsize, fsize);
-        } else {
-          // Generic fleck for non-ore blocks
-          const h = hash2(tx, ty, 3);
-          if (h > 0.6) {
-            ctx.fillStyle = `rgba(0,0,0,0.12)`;
-            const fx = sx + (h * size * 0.7 + size * 0.15);
-            const fy = sy + ((h * 11 % 1) * size * 0.7 + size * 0.15);
-            ctx.fillRect(fx, fy, size * 0.2, size * 0.2);
-          }
-        }
-        break;
-      }
-      case "flat":
-      default:
-        // Already drawn as flat fill
-        break;
     }
   }
 
@@ -234,7 +262,7 @@ export class Renderer {
     ctx.fillStyle = color;
     ctx.fillRect(x, y, w, h);
     ctx.fillStyle = "rgba(20,24,48,0.75)";
-    ctx.fillRect(x, y, w, h * 0.32); // head band
+    ctx.fillRect(x, y, w, h * 0.32);
     ctx.fillStyle = "#0e1330";
     const eyeW = Math.max(2, w * 0.16);
     const eyeX = facing >= 0 ? x + w - eyeW - w * 0.12 : x + w * 0.12;
@@ -263,12 +291,10 @@ export class Renderer {
     const px = camera.worldToScreenX(cursor.tileX * TILE_SIZE);
     const py = camera.worldToScreenY(cursor.tileY * TILE_SIZE);
     const s = TILE_SIZE * zoom;
-
     if (cursor.mining && cursor.miningProgress > 0) {
       ctx.fillStyle = `rgba(255,255,255,${0.12 + cursor.miningProgress * 0.5})`;
       ctx.fillRect(px, py, s, s);
     }
-
     ctx.lineWidth = 2;
     ctx.strokeStyle = cursor.inReach ? "rgba(120,255,150,0.9)" : "rgba(255,110,110,0.85)";
     ctx.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);

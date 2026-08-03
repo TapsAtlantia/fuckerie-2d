@@ -90,3 +90,19 @@ export const INVENTORY = {
 
 // Phase 2: Game mode -------------------------------------------------------
 export const DEFAULT_CREATIVE = false; // default game mode (false = survival)
+
+// Phase A: Rendering / visual overhaul -------------------------------------
+export const SPRITE_PX = 16; // native pixel resolution a tile sprite is drawn at
+export const SPRITE_VARIANTS = 4; // procedural texture variants per material
+export const WALL_DARKEN = 0.5; // background walls rendered this fraction of full brightness
+export const BEVEL_LIGHT = 0.28; // top/left edge highlight strength
+export const BEVEL_DARK = 0.34; // bottom/right edge shadow strength
+export const OVERHANG_PX = 5; // how far grass/snow fringe hangs over the tile top
+
+// Ambient particles
+export const PARTICLE_MAX = 220; // max live ambient particles
+export const PARTICLE_DENSITY = 0.00006; // particles spawned per visible px² per second
+
+// Parallax backdrop scroll factors (0 = fixed to camera, 1 = moves with world)
+export const PARALLAX_FAR = 0.12;
+export const PARALLAX_MID = 0.28;

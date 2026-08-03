@@ -1,7 +1,7 @@
 import { BAND, CHUNK_SIZE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
-import { TileId } from "./Tile";
+import { TileId, tile } from "./Tile";
 import { BiomeSystem, type Biome } from "./Biome";
 import { CaveSystem } from "./Caves";
 import { OreSystem } from "./Ores";
@@ -34,7 +34,7 @@ export class WorldGen {
     this.biomeSystem = new BiomeSystem(seed);
     this.caveSystem = new CaveSystem(seed);
     this.oreSystem = new OreSystem(seed);
-    this.structureSystem = new StructureSystem(seed, this.noise);
+    this.structureSystem = new StructureSystem(seed, this.noise, (x) => this.surfaceHeight(x));
     this.microBiomeSystem = new MicroBiomeSystem(seed);
     this.biomeModifierSystem = new BiomeModifierSystem(seed);
   }
@@ -135,8 +135,8 @@ export class WorldGen {
           }
         }
 
-        // Place ores in stone only
-        if (fg !== TileId.Air && fg !== TileId.CloudStone) {
+        // Place ores in stone only (not dirt/sand/grass/cloud).
+        if (tile(fg).category === "stone") {
           const ore = this.oreSystem.oreAt(worldX, worldY, biome);
           if (ore !== null) {
             fg = ore;
@@ -163,27 +163,25 @@ export class WorldGen {
       const biome = biomeCache[lx];
       const surfaceY = surfaceHeightCache[lx];
       
-      // Only place deco if we have the surface block in this chunk
+      // Place deco in the AIR tile directly above the surface block (surfaceY - 1).
       if (surfaceY >= baseY && surfaceY < baseY + CHUNK_SIZE) {
         const ly = surfaceY - baseY;
-        const surfaceBlock = chunk.fg[ly * CHUNK_SIZE + lx];
-        
-        // Check if this biome supports plants and if we should place one
-        if (biome.plants.length > 0 && biome.plantDensity > 0) {
+        const aboveLy = ly - 1; // the air tile above the surface
+        if (
+          aboveLy >= 0 &&
+          biome.plants.length > 0 &&
+          biome.plantDensity > 0 &&
+          chunk.fg[aboveLy * CHUNK_SIZE + lx] === TileId.Air
+        ) {
+          const surfaceBlock = chunk.fg[ly * CHUNK_SIZE + lx];
           const h = hash2(worldX, surfaceY, this.seed + 777);
           if (h < biome.plantDensity) {
-            // Select a plant type
             const plantIndex = Math.floor(h * biome.plants.length * 10) % biome.plants.length;
             const plant = biome.plants[plantIndex];
-            
-            // Check if the tile above is air (space for plant)
-            if (ly + 1 < CHUNK_SIZE && chunk.fg[(ly + 1) * CHUNK_SIZE + lx] === TileId.Air) {
-              // Special cases
-              if (plant === TileId.Cactus && surfaceBlock !== TileId.Sand) continue; // cactus only on sand
-              if (plant === TileId.TallGrass && surfaceBlock === TileId.Sand) continue; // no grass on sand
-              
-              chunk.fg[(ly + 1) * CHUNK_SIZE + lx] = plant;
-            }
+            const onSand = surfaceBlock === TileId.Sand;
+            // Cactus only on sand; leafy plants not on sand.
+            const ok = plant === TileId.Cactus ? onSand : !onSand;
+            if (ok) chunk.fg[aboveLy * CHUNK_SIZE + lx] = plant;
           }
         }
       }

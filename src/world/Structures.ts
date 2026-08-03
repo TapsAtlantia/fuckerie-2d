@@ -43,16 +43,23 @@ interface BuildingParams {
 export class StructureSystem {
   private seed: number;
   private noise: Noise;
-  
+  private surfaceHeightFn: ((x: number) => number) | null;
+
   // Structure cell size (tiles) - coarse grid for structure placement
   private readonly CELL_SIZE = STRUCTURE.CELL_SIZE;
-  
+
   // Settlement field parameters for villages/cities
   private readonly SETTLEMENT_SCALE = STRUCTURE.SETTLEMENT_SCALE;
 
-  constructor(seed: number, noise: Noise) {
+  constructor(seed: number, noise: Noise, surfaceHeightFn?: (x: number) => number) {
     this.seed = seed;
     this.noise = noise;
+    this.surfaceHeightFn = surfaceHeightFn ?? null;
+  }
+
+  /** True for structure types that sit on the surface (vs underground/sky). */
+  private isSurfaceType(type: StructureType): boolean {
+    return type === "hut" || type === "house" || type === "tower" || type === "castle";
   }
 
   /**
@@ -98,57 +105,73 @@ export class StructureSystem {
     }
     
     // Determine structure type based on depth and random
+    const worldX = cx * this.CELL_SIZE;
     const worldY = cy * this.CELL_SIZE;
-    const type = this.selectStructureType(worldY, h);
-    
-    // Jittered origin within the cell
-    const originX = cx * this.CELL_SIZE + (h * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3);
-    const originY = cy * this.CELL_SIZE + ((h * 17 % 1) * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3);
-    
+    const type = this.selectStructureType(worldX, worldY, h);
+
+    // Jittered X origin within the cell.
+    const originX = Math.floor(cx * this.CELL_SIZE + (h * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3));
+
+    // Surface buildings anchor their floor to the terrain surface; everything else uses the
+    // grid Y (mineshafts/dungeons live in stone, sky temples float in the sky band).
+    let originY: number;
+    if (this.isSurfaceType(type) && this.surfaceHeightFn) {
+      const groundY = this.surfaceHeightFn(originX);
+      originY = groundY - (this.buildingHeight(type) - 1); // floor row lands on groundY
+    } else {
+      originY = Math.floor(cy * this.CELL_SIZE + ((h * 17 % 1) * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3));
+    }
+
     return {
       cx,
       cy,
       hasStructure: true,
       type,
-      originX: Math.floor(originX),
-      originY: Math.floor(originY),
+      originX,
+      originY,
       seed: this.seed + cx * 7 + cy * 13,
     };
   }
 
+  /** Height (tiles) of each surface building — must match the params in stampStructure. */
+  private buildingHeight(type: StructureType): number {
+    switch (type) {
+      case "hut": return 4;
+      case "house": return 6;
+      case "tower": return 10;
+      case "castle": return 8;
+      default: return 6;
+    }
+  }
+
   /** Select structure type based on depth and biome context. */
-  private selectStructureType(worldY: number, h: number): StructureType {
+  private selectStructureType(worldX: number, worldY: number, h: number): StructureType {
     if (worldY < BAND.SKY) {
       return "sky_temple";
     }
-    
+
     if (worldY >= BAND.UNDERWORLD) {
-      // Underground: obsidian fortress (use castle type with hellstone)
+      // Deep: obsidian fortress (castle type switches to obsidian material).
       return "castle";
     }
-    
+
     if (worldY >= BAND.CAVERN - 100) {
-      // Deep underground: dungeons
       return h > 0.85 ? "dungeon" : "mineshaft";
     }
-    
+
     if (worldY >= 50) {
-      // Underground: mineshafts
       return "mineshaft";
     }
-    
-    // Surface: check settlement field for villages/cities
-    const settlement = this.noise.fbm2D(worldY * this.SETTLEMENT_SCALE, 0, 2);
-    
+
+    // Surface: settlement field (sampled along X) drives village/city clustering.
+    const settlement = this.noise.fbm2D(worldX * this.SETTLEMENT_SCALE, 0, 2);
+
     if (settlement > 0.4) {
-      // High settlement = city-like (larger buildings)
-      return h > 0.8 ? "castle" : "house";
+      return h > 0.8 ? "castle" : "house"; // city-like
     } else if (settlement > 0.2) {
-      // Medium settlement = village
-      return h > 0.7 ? "house" : "hut";
+      return h > 0.7 ? "house" : "hut"; // village
     } else {
-      // Low settlement = isolated structures
-      return h > 0.8 ? "tower" : "hut";
+      return h > 0.8 ? "tower" : "hut"; // isolated
     }
   }
 
@@ -294,12 +317,29 @@ export class StructureSystem {
       for (const pos of torchPositions) {
         const worldX = ox + pos.x;
         const worldY = oy + pos.y;
-        
+
         if (worldX >= chunkWorldX && worldX < chunkWorldX + CHUNK_SIZE &&
             worldY >= chunkWorldY && worldY < chunkWorldY + CHUNK_SIZE) {
           const lx = worldX - chunkWorldX;
           const ly = worldY - chunkWorldY;
           overrides.set(`${lx},${ly}`, { fg: TileId.Torch, bg: material });
+        }
+      }
+    }
+
+    // Foundation cast-down: fill from the floor to the terrain in every column so the building
+    // is anchored on uneven ground instead of floating over dips.
+    if (this.surfaceHeightFn && this.isSurfaceType(cell.type)) {
+      const floorY = oy + height - 1;
+      for (let dx = 0; dx < width; dx++) {
+        const worldX = ox + dx;
+        const colGround = this.surfaceHeightFn(worldX);
+        for (let wy = floorY + 1; wy <= colGround; wy++) {
+          if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
+              wy < chunkWorldY || wy >= chunkWorldY + CHUNK_SIZE) continue;
+          const lx = worldX - chunkWorldX;
+          const ly = wy - chunkWorldY;
+          overrides.set(`${lx},${ly}`, { fg: TileId.Cobblestone, bg: TileId.Cobblestone });
         }
       }
     }

@@ -33,6 +33,11 @@ export class Inventory {
     this.creative = creative;
   }
 
+  /** Whether creative mode is on (single source of truth for the whole game). */
+  get isCreative(): boolean {
+    return this.creative;
+  }
+
   /** Get the currently selected hotbar slot. */
   getSelected(): ItemStack | null {
     return this.hotbarSlots[this.selectedSlot];
