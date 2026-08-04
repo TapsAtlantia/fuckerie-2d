@@ -20,12 +20,14 @@ export class Chunk {
   readonly cy: number;
   readonly fg: Uint8Array; // foreground tile ids
   readonly bg: Uint8Array; // background wall tile ids
+  readonly liquid: Uint8Array; // liquid state (see Liquid.ts encoding)
 
   constructor(cx: number, cy: number) {
     this.cx = cx;
     this.cy = cy;
     this.fg = new Uint8Array(AREA); // defaults to Air (0)
     this.bg = new Uint8Array(AREA);
+    this.liquid = new Uint8Array(AREA);
   }
 
   getFg(lx: number, ly: number): number {

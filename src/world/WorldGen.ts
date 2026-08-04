@@ -2,6 +2,7 @@ import { BAND, CHUNK_SIZE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, tile } from "./Tile";
+import { LMAX, LAVA_LEVEL_Y, SEA_LEVEL_Y, makeLiquid } from "./Liquid";
 import { BiomeSystem, type Biome } from "./Biome";
 import { CaveSystem } from "./Caves";
 import { OreSystem } from "./Ores";
@@ -165,6 +166,23 @@ export class WorldGen {
         }
 
         chunk.fg[ly * CHUNK_SIZE + lx] = fg;
+      }
+    }
+
+    // Liquids: fill air with water in low basins (oceans/lakes) and lava in deep cave pockets.
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const worldX = baseX + lx;
+      const surfaceY = surfaceHeightCache[lx];
+      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+        const worldY = baseY + ly;
+        const idx = ly * CHUNK_SIZE + lx;
+        if (chunk.fg[idx] !== TileId.Air) continue;
+        if (worldY >= SEA_LEVEL_Y && worldY < surfaceY) {
+          chunk.liquid[idx] = makeLiquid(false, LMAX); // ocean/lake column in a basin
+        } else if (worldY >= LAVA_LEVEL_Y && worldY > surfaceY) {
+          const n = this.noise.fbm2D(worldX * 0.01 + 12, worldY * 0.01 - 8, 2);
+          if (n > 0.35) chunk.liquid[idx] = makeLiquid(true, LMAX); // deep lava pocket
+        }
       }
     }
 

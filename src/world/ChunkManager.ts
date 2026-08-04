@@ -114,6 +114,20 @@ export class ChunkManager {
     return isSolid(this.getFg(tileX, tileY));
   }
 
+  // --- Liquids (dynamic; not persisted as deltas — re-seeded from worldgen on reload) ----------
+
+  getLiquid(tileX: number, tileY: number): number {
+    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    if (!chunk) return 0;
+    return chunk.liquid[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))];
+  }
+
+  setLiquid(tileX: number, tileY: number, v: number): void {
+    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    if (!chunk) return;
+    chunk.liquid[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))] = v;
+  }
+
   private recordDelta(cx: number, cy: number, idx: number, patch: TileEdit): void {
     const key = chunkKey(cx, cy);
     let edits = this.deltas.get(key);

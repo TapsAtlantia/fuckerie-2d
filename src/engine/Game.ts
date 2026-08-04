@@ -3,6 +3,7 @@ import { Camera } from "./Camera";
 import { Input } from "./Input";
 import { Renderer, type CursorInfo } from "./Renderer";
 import { Lighting } from "../systems/Lighting";
+import { LiquidSim } from "../systems/LiquidSim";
 import { ChunkManager } from "../world/ChunkManager";
 import { WorldGen } from "../world/WorldGen";
 import { Player } from "../entities/Player";
@@ -46,6 +47,7 @@ export class Game {
   private renderer: Renderer;
   private camera = new Camera();
   private lighting = new Lighting();
+  private liquidSim = new LiquidSim();
   private hud: HTMLElement;
 
   private mode: GameMode;
@@ -146,6 +148,16 @@ export class Game {
     const x = (TILE_SIZE - PLAYER_W) / 2;
     const y = (surfaceY - 5) * TILE_SIZE;
     return new Player(x, y);
+  }
+
+  private respawn(): void {
+    const spawn = this.spawnPlayer();
+    this.player.x = spawn.x;
+    this.player.y = spawn.y;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.health = this.player.maxHealth;
+    this.camera.snapTo(this.player.centerX, this.player.centerY);
   }
 
   private beginLoop(): void {
@@ -268,6 +280,14 @@ export class Game {
         this.stateTimer = 0;
       }
     }
+
+    // Liquid flow around the player.
+    const lb = this.camera.tileBounds();
+    const lm = 6;
+    this.liquidSim.step(this.world, lb.minX - lm, lb.minY - lm, lb.maxX + lm, lb.maxY + lm, dt);
+
+    // Death → respawn.
+    if (this.player.health <= 0) this.respawn();
 
     this.computeLighting();
     this.renderer.render(
@@ -480,12 +500,16 @@ export class Game {
     }
     
     const modeLabel = this.inventory.isCreative ? "CREATIVE" : "SURVIVAL";
+    const hp = Math.ceil(this.player.health);
+    const hpBar = "#".repeat(Math.round(hp / 10)) + "-".repeat(10 - Math.round(hp / 10));
+    const water = this.player.inLiquid ? "   ~water~" : "";
     
     this.hud.textContent =
       `fuckerie 2d — Phase 2\n` +
       `${this.profile.name}   [${netLine}]\n` +
       `fps ${this.fps.toFixed(0)}   chunks ${this.world.loadedCount}\n` +
-      `pos ${px}, ${py}   band ${this.bandName(py)}\n` +
+      `pos ${px}, ${py}   band ${this.bandName(py)}${water}\n` +
+      `HP [${hpBar}] ${hp}\n` +
       `${modeLabel}   [${this.inventory.getSelectedIndex() + 1}] ${selName} (${selCount})${this.player.fly ? "   FLY" : ""}   ·  Esc: menu`;
   }
 }

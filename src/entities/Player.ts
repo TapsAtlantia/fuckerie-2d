@@ -15,6 +15,7 @@ import {
 } from "../config";
 import type { Input } from "../engine/Input";
 import type { ChunkManager } from "../world/ChunkManager";
+import { isLava, liquidLevel } from "../world/Liquid";
 
 // AABB platformer physics with momentum and swept, axis-separated tile collision.
 // Movement is sub-stepped so fast falls / fly speed can never tunnel through a tile.
@@ -28,6 +29,10 @@ export class Player {
   onGround = false;
   facing = 1;
   fly = false;
+
+  health = 100;
+  readonly maxHealth = 100;
+  inLiquid = false; // for a submerged tint / HUD
 
   private coyote = 0;
   private jumpBuffer = 0;
@@ -92,6 +97,23 @@ export class Player {
       this.coyote = 0;
       this.onGround = false;
     }
+
+    // Liquids: buoyancy/swimming in water; damage + sink in lava.
+    const lq = world.getLiquid(Math.floor(this.centerX / TILE_SIZE), Math.floor(this.centerY / TILE_SIZE));
+    const lvl = liquidLevel(lq);
+    this.inLiquid = lvl > 0;
+    const inLava = lvl > 0 && isLava(lq);
+    if (lvl > 0) {
+      if (inLava) {
+        this.vy *= 0.6; if (this.vy > 90) this.vy = 90;
+        this.vx *= 0.6;
+        this.health -= 25 * dt;
+      } else {
+        this.vy *= 0.7; if (this.vy > 150) this.vy = 150; // buoyant, slow sink
+        if (jumpHeld) this.vy = -150; // swim up
+      }
+    }
+    if (!inLava && this.health < this.maxHealth) this.health = Math.min(this.maxHealth, this.health + 4 * dt);
 
     this.stepX(world, dt);
     // Auto step-up: if walking into a low ledge/stair while grounded, climb it smoothly instead

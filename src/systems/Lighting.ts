@@ -6,6 +6,7 @@ import {
   TORCH_STRENGTH,
 } from "../config";
 import { TILE_PROPS, TileId, WALL_OPACITY, fgOpacity } from "../world/Tile";
+import { LAVA_COLOR, LAVA_LIGHT, isLava, liquidLevel } from "../world/Liquid";
 import type { ChunkManager } from "../world/ChunkManager";
 
 // Smooth 2D light propagation over the visible tile region, recomputed each frame.
@@ -125,6 +126,18 @@ export class Lighting {
           if (er > r[i]) r[i] = er;
           if (eg > g[i]) g[i] = eg;
           if (eb > b[i]) b[i] = eb;
+          this.enqueue(i);
+        }
+
+        // Lava glows.
+        const lq = world.getLiquid(minTileX + x, minTileY + y);
+        if (liquidLevel(lq) > 0 && isLava(lq)) {
+          const lr = (LAVA_COLOR[0] / 255) * LAVA_LIGHT;
+          const lg = (LAVA_COLOR[1] / 255) * LAVA_LIGHT;
+          const lb = (LAVA_COLOR[2] / 255) * LAVA_LIGHT;
+          if (lr > r[i]) r[i] = lr;
+          if (lg > g[i]) g[i] = lg;
+          if (lb > b[i]) b[i] = lb;
           this.enqueue(i);
         }
       }

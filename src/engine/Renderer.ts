@@ -16,6 +16,7 @@ import {
   tile,
 } from "../world/Tile";
 import { hash2 } from "../world/Noise";
+import { LAVA_COLOR, LMAX, WATER_COLOR, isLava, liquidLevel } from "../world/Liquid";
 import { computeSlope, shapeFrom, type SlopeKind } from "../render/Autotile";
 import { TileSprites } from "../render/TileSprites";
 import { Parallax } from "../render/Parallax";
@@ -120,6 +121,9 @@ export class Renderer {
     for (const r of remotes) this.drawAvatar(camera, r.x, r.y, r.w, r.h, r.facing, r.color);
     this.drawPlayer(camera, player);
 
+    // Liquids (drawn over tiles + players so a submerged player is tinted).
+    this.drawLiquids(camera, world, minX, minY, maxX, maxY);
+
     // TIER 4: lightmap (multiply).
     const lm = lighting.canvas;
     if (lm.width > 0 && lm.height > 0) {
@@ -144,6 +148,35 @@ export class Renderer {
 
   private variantAt(tx: number, ty: number): number {
     return (hash2(tx, ty, 0) * SPRITE_VARIANTS) | 0;
+  }
+
+  private drawLiquids(
+    camera: Camera,
+    world: ChunkManager,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): void {
+    const ctx = this.ctx;
+    const size = TILE_SIZE * camera.zoom;
+    for (let ty = minY; ty <= maxY; ty++) {
+      const sy = camera.worldToScreenY(ty * TILE_SIZE);
+      for (let tx = minX; tx <= maxX; tx++) {
+        const v = world.getLiquid(tx, ty);
+        const lvl = liquidLevel(v);
+        if (lvl === 0) continue;
+        const lava = isLava(v);
+        const sx = camera.worldToScreenX(tx * TILE_SIZE);
+        const h = (lvl / LMAX) * size;
+        const [r, g, b] = lava ? LAVA_COLOR : WATER_COLOR;
+        ctx.fillStyle = `rgba(${r},${g},${b},${lava ? 0.85 : 0.6})`;
+        ctx.fillRect(sx, sy + size - h, size + 1, h + 1);
+        // Surface shimmer line.
+        ctx.fillStyle = `rgba(255,255,255,${lava ? 0.14 : 0.22})`;
+        ctx.fillRect(sx, sy + size - h, size + 1, Math.max(1, size * 0.08));
+      }
+    }
   }
 
   private drawFg(
