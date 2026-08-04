@@ -4,6 +4,7 @@ import { Input } from "./Input";
 import { Renderer, type CursorInfo } from "./Renderer";
 import { Lighting } from "../systems/Lighting";
 import { LiquidSim } from "../systems/LiquidSim";
+import { CreatureManager } from "../systems/CreatureManager";
 import { ChunkManager } from "../world/ChunkManager";
 import { WorldGen } from "../world/WorldGen";
 import { Player } from "../entities/Player";
@@ -48,6 +49,8 @@ export class Game {
   private camera = new Camera();
   private lighting = new Lighting();
   private liquidSim = new LiquidSim();
+  private creatures = new CreatureManager();
+  private attackCd = 0;
   private hud: HTMLElement;
 
   private mode: GameMode;
@@ -286,6 +289,9 @@ export class Game {
     const lm = 6;
     this.liquidSim.step(this.world, lb.minX - lm, lb.minY - lm, lb.maxX + lm, lb.maxY + lm, dt);
 
+    // Creatures.
+    this.creatures.update(dt, this.world, this.player, (x) => this.world.gen.surfaceHeight(x));
+
     // Death → respawn.
     if (this.player.health <= 0) this.respawn();
 
@@ -297,6 +303,7 @@ export class Game {
       this.lighting,
       this.cursor,
       [...this.remote.values()],
+      this.creatures.creatures,
       dt,
     );
 
@@ -377,8 +384,16 @@ export class Game {
     this.cursor.mining = false;
     this.cursor.miningProgress = 0;
 
-    if (inReach && this.input.mouseLeft) this.mine(tileX, tileY, dt);
-    else {
+    if (this.attackCd > 0) this.attackCd -= dt;
+    if (inReach && this.input.mouseLeft) {
+      // Swing at a creature under the cursor first; otherwise mine.
+      if (this.attackCd <= 0 && this.creatures.hitAt(wx, wy, 20)) {
+        this.attackCd = 0.3;
+        this.mineTimer = 0;
+      } else {
+        this.mine(tileX, tileY, dt);
+      }
+    } else {
       this.mineTimer = 0;
       this.mineX = Number.NaN;
     }

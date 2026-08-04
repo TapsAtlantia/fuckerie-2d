@@ -25,6 +25,7 @@ import type { Camera } from "./Camera";
 import type { ChunkManager } from "../world/ChunkManager";
 import type { Player } from "../entities/Player";
 import type { RemotePlayer } from "../entities/RemotePlayer";
+import type { Creature } from "../entities/Creature";
 import type { Lighting } from "../systems/Lighting";
 
 export interface CursorInfo {
@@ -76,6 +77,7 @@ export class Renderer {
     lighting: Lighting,
     cursor: CursorInfo,
     remotes: RemotePlayer[] = [],
+    creatures: Creature[] = [],
     dt = 0,
   ): void {
     const ctx = this.ctx;
@@ -117,8 +119,9 @@ export class Renderer {
       }
     }
 
-    // Players.
+    // Players + creatures.
     for (const r of remotes) this.drawAvatar(camera, r.x, r.y, r.w, r.h, r.facing, r.color);
+    for (const c of creatures) this.drawCreature(camera, c);
     this.drawPlayer(camera, player);
 
     // Liquids (drawn over tiles + players so a submerged player is tinted).
@@ -439,6 +442,54 @@ export class Renderer {
     const eyeW = Math.max(2, w * 0.16);
     const eyeX = facing >= 0 ? x + w - eyeW - w * 0.12 : x + w * 0.12;
     ctx.fillRect(eyeX, y + h * 0.12, eyeW, Math.max(2, h * 0.1));
+  }
+
+  private drawCreature(camera: Camera, c: Creature): void {
+    const ctx = this.ctx;
+    const z = camera.zoom;
+    const x = camera.worldToScreenX(c.x);
+    const y = camera.worldToScreenY(c.y);
+    const w = c.w * z;
+    const h = c.h * z;
+    const flash = c.hurtFlash > 0;
+
+    if (c.kind === "bat") {
+      ctx.fillStyle = flash ? "#ffffff" : "#2a2030";
+      ctx.beginPath(); ctx.moveTo(x, y + h * 0.4); ctx.lineTo(x - w * 0.5, y); ctx.lineTo(x, y + h * 0.95); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + w, y + h * 0.4); ctx.lineTo(x + w * 1.5, y); ctx.lineTo(x + w, y + h * 0.95); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = flash ? "#fff" : "#3a2f42";
+      ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w * 0.5, h * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ff5b5b";
+      ctx.fillRect(x + w * 0.3, y + h * 0.35, Math.max(1, w * 0.12), Math.max(1, h * 0.2));
+      ctx.fillRect(x + w * 0.58, y + h * 0.35, Math.max(1, w * 0.12), Math.max(1, h * 0.2));
+    } else if (c.kind === "slime") {
+      ctx.fillStyle = flash ? "#ffffff" : "#57cf68";
+      ctx.beginPath(); ctx.ellipse(x + w / 2, y + h * 0.58, w * 0.52, h * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
+      ctx.beginPath(); ctx.ellipse(x + w * 0.38, y + h * 0.4, w * 0.2, h * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0e1330";
+      const ex = c.facing >= 0 ? x + w * 0.52 : x + w * 0.18;
+      ctx.fillRect(ex, y + h * 0.42, Math.max(2, w * 0.13), Math.max(2, h * 0.22));
+      ctx.fillRect(ex + w * 0.22, y + h * 0.42, Math.max(2, w * 0.13), Math.max(2, h * 0.22));
+    } else {
+      ctx.fillStyle = flash ? "#ffffff" : "#a9793f";
+      ctx.beginPath(); ctx.ellipse(x + w / 2, y + h * 0.62, w * 0.5, h * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+      const hx = x + (c.facing >= 0 ? w * 0.62 : w * 0.08);
+      ctx.beginPath(); ctx.ellipse(hx + w * 0.15, y + h * 0.32, w * 0.26, h * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = flash ? "#fff" : "#8a5f30";
+      ctx.fillRect(hx + w * 0.02, y, Math.max(1, w * 0.1), h * 0.28);
+      ctx.fillRect(hx + w * 0.24, y, Math.max(1, w * 0.1), h * 0.28);
+      ctx.fillStyle = "#0e1330";
+      ctx.fillRect(hx + (c.facing >= 0 ? w * 0.24 : w * 0.06), y + h * 0.24, Math.max(1, w * 0.1), Math.max(1, h * 0.12));
+    }
+
+    if (c.health < c.maxHealth) {
+      const bw = w;
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(x, y - 6, bw, 3);
+      ctx.fillStyle = c.hostile ? "#e6544c" : "#7ee787";
+      ctx.fillRect(x, y - 6, bw * Math.max(0, c.health / c.maxHealth), 3);
+    }
   }
 
   private drawNameTag(camera: Camera, r: RemotePlayer): void {
