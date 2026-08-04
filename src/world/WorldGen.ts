@@ -135,7 +135,7 @@ export class WorldGen {
 
         // Carve caves below the crust; in rare "entrance" columns the floor drops to 1 so a cave
         // that reaches the surface opens as an organic mouth (only where a tunnel actually exists).
-        if (belowSurface > caveFloorCache[lx] && this.caveSystem.caveAt(worldX, worldY, biome.caveStyle)) {
+        if (belowSurface >= caveFloorCache[lx] && this.caveSystem.caveAt(worldX, worldY, biome.caveStyle)) {
           fg = TileId.Air;
         }
 

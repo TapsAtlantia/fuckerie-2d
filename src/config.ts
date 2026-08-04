@@ -59,13 +59,11 @@ export const BIOME = {
 
 // Phase 2: Cave parameters --------------------------------------------------
 export const CAVE = {
-  REGION_SCALE: 0.004, // scale of cave-region mask: ~250-tile 2D pockets (varies with depth too,
+  REGION_SCALE: 0.0035, // scale of cave-region mask: ~285-tile 2D pockets (varies with depth too,
   // so caves appear at shallow depths — not gated into huge vertical dead-zones)
-  BASE_SCALE: 0.04, // scale of domain-warped noise
+  REGION_THRESHOLD: 0.0, // regionMask (~[-1,1]) must exceed this → ~half the world has cave systems
+  BASE_SCALE: 0.045, // scale of domain-warped tunnel noise
   WARP_SCALE: 0.02, // scale of domain warping
-  WORM_SCALE: 0.03, // scale of worm tunnel noise
-  OPEN_CAVERN_SCALE: 0.015, // scale of open cavern noise
-  SURFACE_ENTRANCE_CHANCE: 0.03, // chance of surface entrance per column
 } as const;
 
 // Phase 2: Ore parameters ---------------------------------------------------
