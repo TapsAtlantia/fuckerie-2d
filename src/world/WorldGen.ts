@@ -2,7 +2,7 @@ import { BAND, CHUNK_SIZE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, tile } from "./Tile";
-import { LMAX, LAVA_LEVEL_Y, SEA_LEVEL_Y, makeLiquid } from "./Liquid";
+import { LMAX, LAVA_LEVEL_Y, makeLiquid } from "./Liquid";
 import { BiomeSystem, type Biome } from "./Biome";
 import { CaveSystem } from "./Caves";
 import { OreSystem } from "./Ores";
@@ -169,19 +169,37 @@ export class WorldGen {
       }
     }
 
-    // Liquids: fill air with water in low basins (oceans/lakes) and lava in deep cave pockets.
+    // Liquids: STATIC + deterministic (identical for every peer — no runtime flow sim, so no
+    // multiplayer desync). Water only pools in genuine surface depressions (lakes/ponds), never a
+    // global flood; lava sits in occasional deep cave pockets.
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const worldX = baseX + lx;
-      const surfaceY = surfaceHeightCache[lx];
+      const here = surfaceHeightCache[lx];
+
+      // A lake exists only where BOTH sides are higher ground (a real basin), gated by a
+      // low-frequency lake field so most dips stay dry. Water fills up to the lower spill rim.
+      const W = 16;
+      const rimL = this.surfaceHeight(worldX - W);
+      const rimR = this.surfaceHeight(worldX + W);
+      if (here > rimL + 3 && here > rimR + 3 && this.noise.fbm2D(worldX * 0.0025 + 88, 3.1, 2) > 0.1) {
+        let level = Math.max(rimL, rimR) + 1; // water surface just below the lower barrier
+        if (here - level > 24) level = here - 24; // cap lake depth
+        for (let wy = level; wy < here; wy++) {
+          const ly = wy - baseY;
+          if (ly < 0 || ly >= CHUNK_SIZE) continue;
+          const idx = ly * CHUNK_SIZE + lx;
+          if (chunk.fg[idx] === TileId.Air && chunk.liquid[idx] === 0) chunk.liquid[idx] = makeLiquid(false, LMAX);
+        }
+      }
+
+      // Deep lava pockets in cave air.
       for (let ly = 0; ly < CHUNK_SIZE; ly++) {
         const worldY = baseY + ly;
+        if (worldY < LAVA_LEVEL_Y) continue;
         const idx = ly * CHUNK_SIZE + lx;
-        if (chunk.fg[idx] !== TileId.Air) continue;
-        if (worldY >= SEA_LEVEL_Y && worldY < surfaceY) {
-          chunk.liquid[idx] = makeLiquid(false, LMAX); // ocean/lake column in a basin
-        } else if (worldY >= LAVA_LEVEL_Y && worldY > surfaceY) {
-          const n = this.noise.fbm2D(worldX * 0.01 + 12, worldY * 0.01 - 8, 2);
-          if (n > 0.35) chunk.liquid[idx] = makeLiquid(true, LMAX); // deep lava pocket
+        if (chunk.fg[idx] !== TileId.Air || chunk.liquid[idx] !== 0) continue;
+        if (this.noise.fbm2D(worldX * 0.02 + 12, worldY * 0.02 - 8, 2) > 0.5) {
+          chunk.liquid[idx] = makeLiquid(true, LMAX);
         }
       }
     }

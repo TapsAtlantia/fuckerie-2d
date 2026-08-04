@@ -3,6 +3,10 @@ import type { ChunkManager } from "../world/ChunkManager";
 
 export type CreatureKind = "critter" | "slime" | "bat";
 
+export const KIND_LIST: readonly CreatureKind[] = ["critter", "slime", "bat"];
+export function kindToNum(k: CreatureKind): number { return KIND_LIST.indexOf(k); }
+export function numToKind(n: number): CreatureKind { return KIND_LIST[n] ?? "critter"; }
+
 const GRAV = 1400;
 const MAX_FALL = 900;
 
@@ -22,6 +26,7 @@ export class Creature {
   facing = 1;
   onGround = false;
   hurtFlash = 0;
+  id = 0;
 
   private timer = Math.random() * 1.5;
   private wanderDir = Math.random() < 0.5 ? -1 : 1;

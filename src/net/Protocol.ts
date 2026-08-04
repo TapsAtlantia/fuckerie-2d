@@ -55,7 +55,33 @@ export interface LeaveMsg {
   from: string;
 }
 
-export type NetMessage = HelloMsg | WelcomeMsg | StateMsg | EditMsg | LeaveMsg;
+// Host → clients: authoritative creature snapshot (creatures are simulated only on the host).
+export interface CreatureState {
+  id: number;
+  kind: number; // 0 critter, 1 slime, 2 bat
+  x: number;
+  y: number;
+  facing: number;
+  hp: number;
+  mhp: number;
+  hurt: boolean;
+}
+export interface CreaturesMsg {
+  type: "creatures";
+  from: string;
+  list: CreatureState[];
+}
+
+// Client → host: request to damage a creature at a world point.
+export interface AttackMsg {
+  type: "attack";
+  from: string;
+  x: number;
+  y: number;
+}
+
+export type NetMessage =
+  | HelloMsg | WelcomeMsg | StateMsg | EditMsg | LeaveMsg | CreaturesMsg | AttackMsg;
 
 // Message types the host relays to the other peers (star topology).
 export const RELAYED: ReadonlySet<NetMessage["type"]> = new Set(["state", "edit", "leave"]);

@@ -3,8 +3,9 @@ import { Camera } from "./Camera";
 import { Input } from "./Input";
 import { Renderer, type CursorInfo } from "./Renderer";
 import { Lighting } from "../systems/Lighting";
-import { LiquidSim } from "../systems/LiquidSim";
 import { CreatureManager } from "../systems/CreatureManager";
+import { Creature, numToKind } from "../entities/Creature";
+import type { CreatureState } from "../net/Protocol";
 import { ChunkManager } from "../world/ChunkManager";
 import { WorldGen } from "../world/WorldGen";
 import { Player } from "../entities/Player";
@@ -48,8 +49,9 @@ export class Game {
   private renderer: Renderer;
   private camera = new Camera();
   private lighting = new Lighting();
-  private liquidSim = new LiquidSim();
   private creatures = new CreatureManager();
+  private remoteCreatures = new Map<number, Creature>();
+  private creatureTimer = 0;
   private attackCd = 0;
   private hud: HTMLElement;
 
@@ -229,9 +231,47 @@ export class Game {
       case "leave":
         this.remote.delete(msg.from);
         break;
+      case "creatures":
+        if (this.mode === "client") this.syncRemoteCreatures(msg.list);
+        break;
+      case "attack":
+        if (this.mode !== "client") this.creatures.hitAt(msg.x, msg.y, 20);
+        break;
       case "hello":
         break; // host: peer appears on its first state message
     }
+  }
+
+  private syncRemoteCreatures(list: CreatureState[]): void {
+    const seen = new Set<number>();
+    for (const s of list) {
+      seen.add(s.id);
+      let c = this.remoteCreatures.get(s.id);
+      if (!c) {
+        c = new Creature(s.x, s.y, numToKind(s.kind));
+        c.id = s.id;
+        this.remoteCreatures.set(s.id, c);
+      }
+      c.x = s.x;
+      c.y = s.y;
+      c.facing = s.facing;
+      c.health = s.hp;
+      c.hurtFlash = s.hurt ? 0.12 : 0;
+    }
+    for (const id of [...this.remoteCreatures.keys()]) if (!seen.has(id)) this.remoteCreatures.delete(id);
+  }
+
+  private attackAt(wx: number, wy: number): boolean {
+    if (this.mode === "client") {
+      for (const c of this.remoteCreatures.values()) {
+        if (wx >= c.x && wx <= c.x + c.w && wy >= c.y && wy <= c.y + c.h) {
+          this.net?.broadcast({ type: "attack", from: this.net.myId, x: wx, y: wy });
+          return true;
+        }
+      }
+      return false;
+    }
+    return this.creatures.hitAt(wx, wy, 20);
   }
 
   private broadcastEdit(x: number, y: number, fg: number): void {
@@ -284,13 +324,17 @@ export class Game {
       }
     }
 
-    // Liquid flow around the player.
-    const lb = this.camera.tileBounds();
-    const lm = 6;
-    this.liquidSim.step(this.world, lb.minX - lm, lb.minY - lm, lb.maxX + lm, lb.maxY + lm, dt);
-
-    // Creatures.
-    this.creatures.update(dt, this.world, this.player, (x) => this.world.gen.surfaceHeight(x));
+    // Creatures: host/single simulate; the host broadcasts snapshots; clients render remotes.
+    if (this.mode !== "client") {
+      this.creatures.update(dt, this.world, this.player, (x) => this.world.gen.surfaceHeight(x));
+      if (this.net && this.mode === "host") {
+        this.creatureTimer += dt;
+        if (this.creatureTimer >= 0.1) {
+          this.creatureTimer = 0;
+          this.net.broadcast({ type: "creatures", from: this.net.myId, list: this.creatures.snapshot() });
+        }
+      }
+    }
 
     // Death → respawn.
     if (this.player.health <= 0) this.respawn();
@@ -303,7 +347,7 @@ export class Game {
       this.lighting,
       this.cursor,
       [...this.remote.values()],
-      this.creatures.creatures,
+      this.mode === "client" ? [...this.remoteCreatures.values()] : this.creatures.creatures,
       dt,
     );
 
@@ -387,7 +431,7 @@ export class Game {
     if (this.attackCd > 0) this.attackCd -= dt;
     if (inReach && this.input.mouseLeft) {
       // Swing at a creature under the cursor first; otherwise mine.
-      if (this.attackCd <= 0 && this.creatures.hitAt(wx, wy, 20)) {
+      if (this.attackCd <= 0 && this.attackAt(wx, wy)) {
         this.attackCd = 0.3;
         this.mineTimer = 0;
       } else {
