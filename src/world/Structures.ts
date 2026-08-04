@@ -1,55 +1,37 @@
-import { hash2 } from "./Noise";
+import { hash2, type Noise } from "./Noise";
 import { TileId } from "./Tile";
 import { BAND, CHUNK_SIZE, STRUCTURE } from "../config";
-import type { Noise } from "./Noise";
+import {
+  legend,
+  pickTemplate,
+  type StructureContext,
+  type StructureTemplate,
+} from "./structures/StructureTemplates";
 
 /**
- * Structure system for deterministic cross-chunk building generation.
- * Uses a coarse grid of structure cells, each hashed from the seed to determine
- * structure type, position, and contents. Pure function ensures seamlessness.
+ * Structure placement engine. The world is procedural, but structures are hand-authored prefab
+ * templates (StructureTemplates.ts). A coarse grid of cells is hashed from the seed to decide,
+ * rarely and by context, whether a structure spawns, which template, where, and mirrored or not.
+ * Templates anchor to the terrain surface (with a foundation cast-down) and are stamped per-chunk,
+ * so placement is deterministic and seamless across chunk borders.
  */
 
-export type StructureType = 
-  | "none" 
-  | "hut" 
-  | "house" 
-  | "tower" 
-  | "castle" 
-  | "dungeon" 
-  | "mineshaft" 
-  | "sky_temple";
-
 interface StructureCell {
-  cx: number; // cell X in structure grid
-  cy: number; // cell Y in structure grid
-  hasStructure: boolean;
-  type: StructureType;
-  originX: number; // world X of structure origin
-  originY: number; // world Y of structure origin
-  seed: number; // RNG seed for this structure
+  has: boolean;
+  template: StructureTemplate | null;
+  originX: number; // world tile of the template's top-left
+  originY: number;
+  mirror: boolean;
+  surface: boolean;
 }
 
-interface BuildingParams {
-  width: number;
-  height: number;
-  material: TileId;
-  roofStyle: "flat" | "peaked" | "dome";
-  hasDoor: boolean;
-  hasWindows: boolean;
-  hasTorches: boolean;
-  floors: number;
-}
+const EMPTY: StructureCell = { has: false, template: null, originX: 0, originY: 0, mirror: false, surface: false };
 
 export class StructureSystem {
   private seed: number;
   private noise: Noise;
   private surfaceHeightFn: ((x: number) => number) | null;
-
-  // Structure cell size (tiles) - coarse grid for structure placement
-  private readonly CELL_SIZE = STRUCTURE.CELL_SIZE;
-
-  // Settlement field parameters for villages/cities
-  private readonly SETTLEMENT_SCALE = STRUCTURE.SETTLEMENT_SCALE;
+  private readonly CELL = STRUCTURE.CELL_SIZE;
 
   constructor(seed: number, noise: Noise, surfaceHeightFn?: (x: number) => number) {
     this.seed = seed;
@@ -57,494 +39,104 @@ export class StructureSystem {
     this.surfaceHeightFn = surfaceHeightFn ?? null;
   }
 
-  /** True for structure types that sit on the surface (vs underground/sky). */
-  private isSurfaceType(type: StructureType): boolean {
-    return type === "hut" || type === "house" || type === "tower" || type === "castle";
-  }
-
-  /**
-   * Get structure tile overrides for a chunk.
-   * Returns a map of local (lx, ly) -> (fg, bg) tile IDs that should be overwritten.
-   */
-  structureOverridesForChunk(
-    chunkCx: number,
-    chunkCy: number
-  ): Map<string, { fg: TileId; bg: TileId }> {
+  /** Tile overrides (fg+bg) contributed by structures overlapping this chunk. */
+  structureOverridesForChunk(chunkCx: number, chunkCy: number): Map<string, { fg: TileId; bg: TileId }> {
     const overrides = new Map<string, { fg: TileId; bg: TileId }>();
-    
-    const chunkWorldX = chunkCx * CHUNK_SIZE;
-    const chunkWorldY = chunkCy * CHUNK_SIZE;
-    
-    // Calculate which structure cells could intersect this chunk
-    const minCellX = Math.floor((chunkWorldX - this.CELL_SIZE) / this.CELL_SIZE);
-    const maxCellX = Math.floor((chunkWorldX + CHUNK_SIZE + this.CELL_SIZE) / this.CELL_SIZE);
-    const minCellY = Math.floor((chunkWorldY - this.CELL_SIZE) / this.CELL_SIZE);
-    const maxCellY = Math.floor((chunkWorldY + CHUNK_SIZE + this.CELL_SIZE) / this.CELL_SIZE);
-    
-    for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
-      for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
-        const cell = this.getStructureCell(cellX, cellY);
-        if (cell.hasStructure) {
-          this.stampStructure(cell, chunkWorldX, chunkWorldY, overrides);
-        }
+    const cwX = chunkCx * CHUNK_SIZE;
+    const cwY = chunkCy * CHUNK_SIZE;
+
+    // Templates fit within ~one cell of their origin, so scanning a 2-cell margin is ample.
+    const pad = 2;
+    const minCX = Math.floor(cwX / this.CELL) - pad;
+    const maxCX = Math.floor((cwX + CHUNK_SIZE) / this.CELL) + pad;
+    const minCY = Math.floor(cwY / this.CELL) - pad;
+    const maxCY = Math.floor((cwY + CHUNK_SIZE) / this.CELL) + pad;
+
+    for (let cellX = minCX; cellX <= maxCX; cellX++) {
+      for (let cellY = minCY; cellY <= maxCY; cellY++) {
+        const cell = this.cellAt(cellX, cellY);
+        if (cell.has) this.stamp(cell, cwX, cwY, overrides);
       }
     }
-    
     return overrides;
   }
 
-  /** Get structure cell properties from deterministic hash. */
-  private getStructureCell(cx: number, cy: number): StructureCell {
+  private cellAt(cx: number, cy: number): StructureCell {
     const h = hash2(cx, cy, this.seed);
-    
-    // Determine if this cell has a structure
-    const hasStructure = h > (1 - STRUCTURE.STRUCTURE_CHANCE); // 30% of cells have structures
-    
-    if (!hasStructure) {
-      return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
-    }
-    
-    // Determine structure type based on depth and random
-    const worldX = cx * this.CELL_SIZE;
-    const worldY = cy * this.CELL_SIZE;
+    if (h >= STRUCTURE.STRUCTURE_CHANCE) return EMPTY; // sparse base rate
 
-    // Context culling so the world isn't crowded: sky is very rare, underground occasional, and
-    // surface structures cluster in settlement regions (sparse wilderness elsewhere).
+    const worldY = cy * this.CELL;
+    const context: StructureContext = worldY < BAND.SKY ? "sky" : worldY >= 40 ? "underground" : "surface";
+
+    // Context culling so nothing feels crowded.
     const h2 = hash2(cx, cy, this.seed + 555);
-    if (worldY < BAND.SKY) {
-      if (h2 > 0.12) return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
-    } else if (worldY >= 40) {
-      if (h2 > 0.45) return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
+    if (context === "sky") {
+      if (h2 > 0.14) return EMPTY; // very rare
+    } else if (context === "underground") {
+      if (h2 > 0.5) return EMPTY; // occasional
     } else {
-      const settlement = this.noise.fbm2D(worldX * this.SETTLEMENT_SCALE, 0, 2);
-      if (settlement < 0.2 && h2 > 0.35) {
-        return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
-      }
+      // Surface: cluster into settlements (villages) with a few scattered elsewhere.
+      const settlement = this.noise.fbm2D(cx * this.CELL * STRUCTURE.SETTLEMENT_SCALE, 0, 2);
+      if (settlement < 0.25 && h2 > 0.4) return EMPTY;
     }
 
-    const type = this.selectStructureType(worldX, worldY, h);
+    const template = pickTemplate(context, hash2(cx, cy, this.seed + 71));
+    if (!template) return EMPTY;
 
-    // Jittered X origin within the cell.
-    const originX = Math.floor(cx * this.CELL_SIZE + (h * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3));
+    const width = template.rows[0].length;
+    const originX = Math.floor(cx * this.CELL + (h * 0.5 + 0.25) * this.CELL - width / 2);
 
-    // Surface buildings anchor their floor to the terrain surface; everything else uses the
-    // grid Y (mineshafts/dungeons live in stone, sky temples float in the sky band).
     let originY: number;
-    if (this.isSurfaceType(type) && this.surfaceHeightFn) {
-      const groundY = this.surfaceHeightFn(originX);
-      originY = groundY - (this.buildingHeight(type) - 1); // floor row lands on groundY
+    if (context === "surface" && this.surfaceHeightFn) {
+      const centerX = originX + Math.floor(width / 2);
+      originY = this.surfaceHeightFn(centerX) - template.anchorRow; // anchor row sits on the ground
     } else {
-      originY = Math.floor(cy * this.CELL_SIZE + ((h * 17 % 1) * this.CELL_SIZE * 0.4 + this.CELL_SIZE * 0.3));
+      originY = Math.floor(cy * this.CELL + (((h * 17) % 1) * 0.5 + 0.25) * this.CELL);
     }
 
     return {
-      cx,
-      cy,
-      hasStructure: true,
-      type,
+      has: true,
+      template,
       originX,
       originY,
-      seed: this.seed + cx * 7 + cy * 13,
+      mirror: hash2(cx, cy, this.seed + 9) < 0.5,
+      surface: context === "surface",
     };
   }
 
-  /** Height (tiles) of each surface building — must match the params in stampStructure. */
-  private buildingHeight(type: StructureType): number {
-    switch (type) {
-      case "hut": return 4;
-      case "house": return 6;
-      case "tower": return 10;
-      case "castle": return 8;
-      default: return 6;
-    }
-  }
-
-  /** Select structure type based on depth and biome context. */
-  private selectStructureType(worldX: number, worldY: number, h: number): StructureType {
-    if (worldY < BAND.SKY) {
-      return "sky_temple";
-    }
-
-    if (worldY >= BAND.UNDERWORLD) {
-      // Deep: obsidian fortress (castle type switches to obsidian material).
-      return "castle";
-    }
-
-    if (worldY >= BAND.CAVERN - 100) {
-      return h > 0.85 ? "dungeon" : "mineshaft";
-    }
-
-    if (worldY >= 50) {
-      return "mineshaft";
-    }
-
-    // Surface: settlement field (sampled along X) drives village/city clustering.
-    const settlement = this.noise.fbm2D(worldX * this.SETTLEMENT_SCALE, 0, 2);
-
-    if (settlement > 0.4) {
-      return h > 0.8 ? "castle" : "house"; // city-like
-    } else if (settlement > 0.2) {
-      return h > 0.7 ? "house" : "hut"; // village
-    } else {
-      return h > 0.8 ? "tower" : "hut"; // isolated
-    }
-  }
-
-  /** Stamp a structure's tiles into the overrides map if they fall within the chunk. */
-  private stampStructure(
+  private stamp(
     cell: StructureCell,
-    chunkWorldX: number,
-    chunkWorldY: number,
-    overrides: Map<string, { fg: TileId; bg: TileId }>
-  ): void {
-    switch (cell.type) {
-      case "hut":
-        this.stampBuilding(cell, chunkWorldX, chunkWorldY, overrides, {
-          width: 5,
-          height: 4,
-          material: TileId.Planks,
-          roofStyle: "peaked",
-          hasDoor: true,
-          hasWindows: false,
-          hasTorches: true,
-          floors: 1,
-        });
-        break;
-      case "house":
-        this.stampBuilding(cell, chunkWorldX, chunkWorldY, overrides, {
-          width: 7,
-          height: 6,
-          material: TileId.StoneBrick,
-          roofStyle: "peaked",
-          hasDoor: true,
-          hasWindows: true,
-          hasTorches: true,
-          floors: 2,
-        });
-        break;
-      case "tower":
-        this.stampBuilding(cell, chunkWorldX, chunkWorldY, overrides, {
-          width: 4,
-          height: 10,
-          material: TileId.Cobblestone,
-          roofStyle: "flat",
-          hasDoor: true,
-          hasWindows: true,
-          hasTorches: true,
-          floors: 3,
-        });
-        break;
-      case "castle":
-        this.stampBuilding(cell, chunkWorldX, chunkWorldY, overrides, {
-          width: 12,
-          height: 8,
-          material: cell.originY >= BAND.UNDERWORLD ? TileId.Obsidian : TileId.StoneBrick,
-          roofStyle: "flat",
-          hasDoor: true,
-          hasWindows: true,
-          hasTorches: true,
-          floors: 2,
-        });
-        break;
-      case "dungeon":
-        this.stampDungeon(cell, chunkWorldX, chunkWorldY, overrides);
-        break;
-      case "mineshaft":
-        this.stampMineshaft(cell, chunkWorldX, chunkWorldY, overrides);
-        break;
-      case "sky_temple":
-        this.stampSkyTemple(cell, chunkWorldX, chunkWorldY, overrides);
-        break;
-      case "none":
-        break;
-    }
-  }
-
-  /** Stamp a basic building structure. */
-  private stampBuilding(
-    cell: StructureCell,
-    chunkWorldX: number,
-    chunkWorldY: number,
+    cwX: number,
+    cwY: number,
     overrides: Map<string, { fg: TileId; bg: TileId }>,
-    params: BuildingParams
   ): void {
-    const { width, height, material, roofStyle, hasDoor, hasWindows, hasTorches, floors } = params;
-    const ox = cell.originX;
-    const oy = cell.originY;
-    
-    for (let dy = 0; dy < height; dy++) {
-      for (let dx = 0; dx < width; dx++) {
-        const worldX = ox + dx;
-        const worldY = oy + dy;
-        
-        // Check if this tile is within the chunk
-        if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-            worldY < chunkWorldY || worldY >= chunkWorldY + CHUNK_SIZE) {
-          continue;
-        }
-        
-        const lx = worldX - chunkWorldX;
-        const ly = worldY - chunkWorldY;
-        const key = `${lx},${ly}`;
-        
-        const isWall = dx === 0 || dx === width - 1 || dy === 0 || dy === height - 1;
-        const isDoor = hasDoor && dy === height - 1 && dx === Math.floor(width / 2);
-        const isWindow = hasWindows && !isDoor && !isWall && 
-                         (dx === 1 || dx === width - 2) && dy > 0 && dy < height - 1;
-        
-        if (isDoor) {
-          overrides.set(key, { fg: TileId.Air, bg: TileId.Planks });
-        } else if (isWindow) {
-          overrides.set(key, { fg: TileId.Glass, bg: material });
-        } else if (isWall) {
-          overrides.set(key, { fg: material, bg: TileId.Air });
-        } else {
-          overrides.set(key, { fg: TileId.Air, bg: material });
-        }
-      }
-    }
-    
-    // Roof
-    if (roofStyle === "peaked") {
-      for (let i = 0; i <= Math.floor(width / 2); i++) {
-        const roofY = oy - 1 - i;
-        for (let dx = i; dx < width - i; dx++) {
-          const worldX = ox + dx;
-          const worldY = roofY;
-          
-          if (worldX >= chunkWorldX && worldX < chunkWorldX + CHUNK_SIZE &&
-              worldY >= chunkWorldY && worldY < chunkWorldY + CHUNK_SIZE) {
-            const lx = worldX - chunkWorldX;
-            const ly = worldY - chunkWorldY;
-            overrides.set(`${lx},${ly}`, { fg: material, bg: TileId.Air });
-          }
-        }
-      }
-    }
-    
-    // Torches
-    if (hasTorches) {
-      const torchPositions = [
-        { x: 1, y: height - 2 },
-        { x: width - 2, y: height - 2 },
-      ];
-      
-      for (const pos of torchPositions) {
-        const worldX = ox + pos.x;
-        const worldY = oy + pos.y;
+    const t = cell.template!;
+    const rows = t.rows;
+    const w = rows[0].length;
 
-        if (worldX >= chunkWorldX && worldX < chunkWorldX + CHUNK_SIZE &&
-            worldY >= chunkWorldY && worldY < chunkWorldY + CHUNK_SIZE) {
-          const lx = worldX - chunkWorldX;
-          const ly = worldY - chunkWorldY;
-          overrides.set(`${lx},${ly}`, { fg: TileId.Torch, bg: material });
-        }
+    for (let row = 0; row < rows.length; row++) {
+      const line = rows[row];
+      for (let col = 0; col < w; col++) {
+        const ch = cell.mirror ? line[w - 1 - col] : line[col];
+        const def = legend(ch);
+        if (!def) continue;
+        const worldX = cell.originX + col;
+        const worldY = cell.originY + row;
+        if (worldX < cwX || worldX >= cwX + CHUNK_SIZE || worldY < cwY || worldY >= cwY + CHUNK_SIZE) continue;
+        overrides.set(`${worldX - cwX},${worldY - cwY}`, { fg: def.fg, bg: def.bg });
       }
     }
 
-    // Foundation cast-down: fill from the floor to the terrain in every column so the building
-    // is anchored on uneven ground instead of floating over dips.
-    if (this.surfaceHeightFn && this.isSurfaceType(cell.type)) {
-      const floorY = oy + height - 1;
-      for (let dx = 0; dx < width; dx++) {
-        const worldX = ox + dx;
+    // Foundation cast-down: keep surface structures anchored on uneven ground.
+    if (cell.surface && this.surfaceHeightFn) {
+      const floorY = cell.originY + t.anchorRow;
+      for (let col = 0; col < w; col++) {
+        const worldX = cell.originX + col;
         const colGround = this.surfaceHeightFn(worldX);
         for (let wy = floorY + 1; wy <= colGround; wy++) {
-          if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-              wy < chunkWorldY || wy >= chunkWorldY + CHUNK_SIZE) continue;
-          const lx = worldX - chunkWorldX;
-          const ly = wy - chunkWorldY;
-          overrides.set(`${lx},${ly}`, { fg: TileId.Cobblestone, bg: TileId.Cobblestone });
+          if (worldX < cwX || worldX >= cwX + CHUNK_SIZE || wy < cwY || wy >= cwY + CHUNK_SIZE) continue;
+          overrides.set(`${worldX - cwX},${wy - cwY}`, { fg: TileId.Cobblestone, bg: TileId.Cobblestone });
         }
-      }
-    }
-  }
-
-  /** Stamp a simple dungeon room. */
-  private stampDungeon(
-    cell: StructureCell,
-    chunkWorldX: number,
-    chunkWorldY: number,
-    overrides: Map<string, { fg: TileId; bg: TileId }>
-  ): void {
-    const ox = cell.originX;
-    const oy = cell.originY;
-    const width = 8;
-    const height = 6;
-    
-    for (let dy = 0; dy < height; dy++) {
-      for (let dx = 0; dx < width; dx++) {
-        const worldX = ox + dx;
-        const worldY = oy + dy;
-        
-        if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-            worldY < chunkWorldY || worldY >= chunkWorldY + CHUNK_SIZE) {
-          continue;
-        }
-        
-        const lx = worldX - chunkWorldX;
-        const ly = worldY - chunkWorldY;
-        const key = `${lx},${ly}`;
-        
-        const isWall = dx === 0 || dx === width - 1 || dy === 0 || dy === height - 1;
-        const isDoor = dy === height - 1 && dx === Math.floor(width / 2);
-        
-        if (isDoor) {
-          overrides.set(key, { fg: TileId.Air, bg: TileId.StoneBrick });
-        } else if (isWall) {
-          overrides.set(key, { fg: TileId.StoneBrick, bg: TileId.Air });
-        } else {
-          overrides.set(key, { fg: TileId.Air, bg: TileId.StoneBrick });
-        }
-      }
-    }
-    
-    // Add a torch
-    const torchX = ox + 1;
-    const torchY = oy + 1;
-    if (torchX >= chunkWorldX && torchX < chunkWorldX + CHUNK_SIZE &&
-        torchY >= chunkWorldY && torchY < chunkWorldY + CHUNK_SIZE) {
-      const lx = torchX - chunkWorldX;
-      const ly = torchY - chunkWorldY;
-      overrides.set(`${lx},${ly}`, { fg: TileId.Torch, bg: TileId.StoneBrick });
-    }
-  }
-
-  /** Stamp a mineshaft corridor. */
-  private stampMineshaft(
-    cell: StructureCell,
-    chunkWorldX: number,
-    chunkWorldY: number,
-    overrides: Map<string, { fg: TileId; bg: TileId }>
-  ): void {
-    const ox = cell.originX;
-    const oy = cell.originY;
-    const length = 20;
-    const direction = hash2(cell.cx, cell.cy, cell.seed) > 0.5 ? "horizontal" : "vertical";
-    
-    if (direction === "horizontal") {
-      for (let dx = 0; dx < length; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          const worldX = ox + dx;
-          const worldY = oy + dy;
-          
-          if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-              worldY < chunkWorldY || worldY >= chunkWorldY + CHUNK_SIZE) {
-            continue;
-          }
-          
-          const lx = worldX - chunkWorldX;
-          const ly = worldY - chunkWorldY;
-          const key = `${lx},${ly}`;
-          
-          const isWall = dy === -1 || dy === 1;
-          if (isWall) {
-            overrides.set(key, { fg: TileId.Planks, bg: TileId.Air });
-          } else {
-            overrides.set(key, { fg: TileId.Air, bg: TileId.Planks });
-          }
-        }
-      }
-    } else {
-      for (let dy = 0; dy < length; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const worldX = ox + dx;
-          const worldY = oy + dy;
-          
-          if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-              worldY < chunkWorldY || worldY >= chunkWorldY + CHUNK_SIZE) {
-            continue;
-          }
-          
-          const lx = worldX - chunkWorldX;
-          const ly = worldY - chunkWorldY;
-          const key = `${lx},${ly}`;
-          
-          const isWall = dx === -1 || dx === 1;
-          if (isWall) {
-            overrides.set(key, { fg: TileId.Planks, bg: TileId.Air });
-          } else {
-            overrides.set(key, { fg: TileId.Air, bg: TileId.Planks });
-          }
-        }
-      }
-    }
-    
-    // Add torches periodically
-    const torchInterval = 5;
-    for (let i = 0; i < length; i += torchInterval) {
-      let torchX, torchY;
-      if (direction === "horizontal") {
-        torchX = ox + i;
-        torchY = oy;
-      } else {
-        torchX = ox;
-        torchY = oy + i;
-      }
-      
-      if (torchX >= chunkWorldX && torchX < chunkWorldX + CHUNK_SIZE &&
-          torchY >= chunkWorldY && torchY < chunkWorldY + CHUNK_SIZE) {
-        const lx = torchX - chunkWorldX;
-        const ly = torchY - chunkWorldY;
-        overrides.set(`${lx},${ly}`, { fg: TileId.Torch, bg: TileId.Planks });
-      }
-    }
-  }
-
-  /** Stamp a sky temple on floating islands. */
-  private stampSkyTemple(
-    cell: StructureCell,
-    chunkWorldX: number,
-    chunkWorldY: number,
-    overrides: Map<string, { fg: TileId; bg: TileId }>
-  ): void {
-    const ox = cell.originX;
-    const oy = cell.originY;
-    const width = 10;
-    const height = 8;
-    
-    for (let dy = 0; dy < height; dy++) {
-      for (let dx = 0; dx < width; dx++) {
-        const worldX = ox + dx;
-        const worldY = oy + dy;
-        
-        if (worldX < chunkWorldX || worldX >= chunkWorldX + CHUNK_SIZE ||
-            worldY < chunkWorldY || worldY >= chunkWorldY + CHUNK_SIZE) {
-          continue;
-        }
-        
-        const lx = worldX - chunkWorldX;
-        const ly = worldY - chunkWorldY;
-        const key = `${lx},${ly}`;
-        
-        const isWall = dx === 0 || dx === width - 1 || dy === 0 || dy === height - 1;
-        const isPillar = (dx === 2 || dx === width - 3) && dy < height - 1;
-        
-        if (isPillar) {
-          overrides.set(key, { fg: TileId.SkyStone, bg: TileId.Air });
-        } else if (isWall) {
-          overrides.set(key, { fg: TileId.CloudStone, bg: TileId.Air });
-        } else {
-          overrides.set(key, { fg: TileId.Air, bg: TileId.CloudStone });
-        }
-      }
-    }
-    
-    // Add lanterns
-    const lanternPositions = [
-      { x: 1, y: height - 2 },
-      { x: width - 2, y: height - 2 },
-    ];
-    
-    for (const pos of lanternPositions) {
-      const worldX = ox + pos.x;
-      const worldY = oy + pos.y;
-      
-      if (worldX >= chunkWorldX && worldX < chunkWorldX + CHUNK_SIZE &&
-          worldY >= chunkWorldY && worldY < chunkWorldY + CHUNK_SIZE) {
-        const lx = worldX - chunkWorldX;
-        const ly = worldY - chunkWorldY;
-        overrides.set(`${lx},${ly}`, { fg: TileId.Lantern, bg: TileId.CloudStone });
       }
     }
   }
