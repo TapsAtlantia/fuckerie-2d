@@ -29,7 +29,10 @@ export class Lighting {
   private g = new Int16Array(0);
   private b = new Int16Array(0);
   private opacity = new Float32Array(0); // 0 = transparent, 1 = fully blocking
-  private queue: number[] = [];
+  // Fixed-capacity flood-fill work queue (never grows → can't overflow).
+  private q = new Int32Array(0);
+  private qCap = 0;
+  private qTail = 0;
 
   constructor() {
     this.canvas = document.createElement("canvas");
@@ -49,6 +52,9 @@ export class Lighting {
     this.g = new Int16Array(area);
     this.b = new Int16Array(area);
     this.opacity = new Float32Array(area);
+    // Each cell can be enqueued a small bounded number of times; 6× area is ample headroom.
+    this.qCap = area * 6 + 64;
+    this.q = new Int32Array(this.qCap);
     this.image = this.ctx.createImageData(w, h);
   }
 
@@ -62,6 +68,13 @@ export class Lighting {
     playerTileY: number,
     dayLevel = 1,
   ): void {
+    // Safety clamp: never let the lit region explode (guards against any bad camera/zoom state
+    // that would otherwise allocate huge buffers and stall the flood fill).
+    const MAX_W = 260;
+    const MAX_H = 200;
+    if (maxTileX - minTileX + 1 > MAX_W) maxTileX = minTileX + MAX_W - 1;
+    if (maxTileY - minTileY + 1 > MAX_H) maxTileY = minTileY + MAX_H - 1;
+
     const w = maxTileX - minTileX + 1;
     const h = maxTileY - minTileY + 1;
     if (w <= 0 || h <= 0) return;
@@ -73,8 +86,7 @@ export class Lighting {
     r.fill(0);
     g.fill(0);
     b.fill(0);
-    const queue = this.queue;
-    queue.length = 0;
+    this.qTail = 0;
 
     const dayR = DAYLIGHT[0] * dayLevel;
     const dayG = DAYLIGHT[1] * dayLevel;
@@ -101,7 +113,7 @@ export class Lighting {
           r[i] = dayR * skyLevel;
           g[i] = dayG * skyLevel;
           b[i] = dayB * skyLevel;
-          queue.push(i);
+          this.enqueue(i);
         }
         skyLevel *= 1 - o; // light passing to the tile below
 
@@ -113,7 +125,7 @@ export class Lighting {
           if (er > r[i]) r[i] = er;
           if (eg > g[i]) g[i] = eg;
           if (eb > b[i]) b[i] = eb;
-          queue.push(i);
+          this.enqueue(i);
         }
       }
     }
@@ -129,24 +141,25 @@ export class Lighting {
       if (tr > r[i]) r[i] = tr;
       if (tg > g[i]) g[i] = tg;
       if (tb > b[i]) b[i] = tb;
-      queue.push(i);
+      this.enqueue(i);
     }
 
-    // Flood-fill relaxation. Values only ever increase, so this terminates.
+    // Flood-fill relaxation. Light only decreases per hop and dim light isn't re-queued, so the
+    // number of enqueues is bounded by the region size — no runaway.
+    const q = this.q;
     let head = 0;
-    while (head < queue.length) {
-      const i = queue[head++];
+    while (head < this.qTail) {
+      const i = q[head++];
       const x = i % w;
       const y = (i / w) | 0;
       const cr = r[i];
       const cg = g[i];
       const cb = b[i];
 
-      // Spread to the four orthogonal neighbours.
-      if (x > 0) this.spread(i - 1, cr, cg, cb, queue);
-      if (x < w - 1) this.spread(i + 1, cr, cg, cb, queue);
-      if (y > 0) this.spread(i - w, cr, cg, cb, queue);
-      if (y < h - 1) this.spread(i + w, cr, cg, cb, queue);
+      if (x > 0) this.spread(i - 1, cr, cg, cb);
+      if (x < w - 1) this.spread(i + 1, cr, cg, cb);
+      if (y > 0) this.spread(i - w, cr, cg, cb);
+      if (y < h - 1) this.spread(i + w, cr, cg, cb);
     }
 
     // Write to the lightmap image.
@@ -162,32 +175,27 @@ export class Lighting {
     this.ctx.putImageData(img, 0, 0);
   }
 
-  private spread(
-    ni: number,
-    cr: number,
-    cg: number,
-    cb: number,
-    queue: number[],
-  ): void {
+  private spread(ni: number, cr: number, cg: number, cb: number): void {
     // Light loses more entering an opaque tile: air ≈ base loss, solid ≈ full loss, glass/walls
     // in between (so windows and rooms glow rather than going pitch black).
     const loss = LIGHT_ATTEN_AIR + this.opacity[ni] * (LIGHT_ATTEN_SOLID - LIGHT_ATTEN_AIR);
-    const nr = cr - loss;
-    const ng = cg - loss;
-    const nb = cb - loss;
+    // Floor to an integer: values are stored in an Int16Array, so a fractional result (from
+    // fractional opacity on walls/glass) would compare `>` the truncated stored value forever
+    // and never converge — an infinite re-queue. Integers strictly decrease → the fill terminates.
+    const nr = Math.floor(cr - loss);
+    const ng = Math.floor(cg - loss);
+    const nb = Math.floor(cb - loss);
     let improved = false;
-    if (nr > this.r[ni]) {
-      this.r[ni] = nr;
-      improved = true;
-    }
-    if (ng > this.g[ni]) {
-      this.g[ni] = ng;
-      improved = true;
-    }
-    if (nb > this.b[ni]) {
-      this.b[ni] = nb;
-      improved = true;
-    }
-    if (improved) queue.push(ni);
+    let mx = 0;
+    if (nr > this.r[ni]) { this.r[ni] = nr; improved = true; if (nr > mx) mx = nr; }
+    if (ng > this.g[ni]) { this.g[ni] = ng; improved = true; if (ng > mx) mx = ng; }
+    if (nb > this.b[ni]) { this.b[ni] = nb; improved = true; if (nb > mx) mx = nb; }
+    // Only re-queue if this cell still has enough light to reach a neighbour (one more hop loses
+    // at least LIGHT_ATTEN_AIR). This bounds the flood fill tightly.
+    if (improved && mx > LIGHT_ATTEN_AIR) this.enqueue(ni);
+  }
+
+  private enqueue(i: number): void {
+    if (this.qTail < this.qCap) this.q[this.qTail++] = i;
   }
 }
