@@ -15,7 +15,7 @@ import {
   overhangColor,
 } from "../world/Tile";
 import { hash2 } from "../world/Noise";
-import { shapeFrom } from "../render/Autotile";
+import { computeSlope, shapeFrom, type SlopeKind } from "../render/Autotile";
 import { TileSprites } from "../render/TileSprites";
 import { Parallax } from "../render/Parallax";
 import { Particles } from "../render/Particles";
@@ -160,11 +160,9 @@ export class Renderer {
     const sprite = this.sprites.get(fg, this.variantAt(tx, ty));
     if (!sprite) return;
 
-    // Non-solid deco (plants, torches): draw inset so they read as small props, no bevels.
+    // Non-solid deco (plants, torches) get their own upright sprites.
     if (!isSolid(fg)) {
-      const inx = size * 0.16;
-      const iny = size * 0.28;
-      ctx.drawImage(sprite, sx + inx, sy + iny, size - inx * 2, size - iny);
+      this.drawDeco(ctx, sprite, sx, sy, size, fg);
       return;
     }
 
@@ -172,72 +170,142 @@ export class Renderer {
     const rS = connectsForAutotile(world.getFg(tx + 1, ty));
     const bS = connectsForAutotile(world.getFg(tx, ty + 1));
     const lS = connectsForAutotile(world.getFg(tx - 1, ty));
-    const shape = shapeFrom(tS, rS, bS, lS, canSlope(fg));
+    const shape = shapeFrom(tS, rS, bS, lS, false);
 
-    if (shape.slope !== "none") {
+    // Two-tier, run-delayed slope (surface terrain tiles only).
+    const slope = !tS && canSlope(fg)
+      ? computeSlope((dx, dy) => connectsForAutotile(world.getFg(tx + dx, ty + dy)), true)
+      : { kind: "none" as SlopeKind, roundTL: false, roundTR: false };
+
+    if (slope.kind !== "none") {
+      this.drawSlopeTile(ctx, sprite, sx, sy, size, draw, slope.kind, fg, tx, ty);
+      return;
+    }
+
+    // Square block, optionally chamfered at a cliff/peak corner for an organic silhouette.
+    if (slope.roundTL || slope.roundTR) {
+      const c = size * 0.32;
       ctx.save();
       ctx.beginPath();
-      if (shape.slope === "left") {
-        // keep lower-right triangle (cut top-left)
-        ctx.moveTo(sx, sy + size);
-        ctx.lineTo(sx + size, sy + size);
-        ctx.lineTo(sx + size, sy);
-      } else {
-        // keep lower-left triangle (cut top-right)
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(sx, sy + size);
-        ctx.lineTo(sx + size, sy + size);
-      }
+      ctx.moveTo(sx + (slope.roundTL ? c : 0), sy);
+      ctx.lineTo(sx + size - (slope.roundTR ? c : 0), sy);
+      if (slope.roundTR) ctx.lineTo(sx + size, sy + c);
+      ctx.lineTo(sx + size, sy + size);
+      ctx.lineTo(sx, sy + size);
+      if (slope.roundTL) ctx.lineTo(sx, sy + c);
       ctx.closePath();
       ctx.clip();
       ctx.drawImage(sprite, sx, sy, draw, draw);
       ctx.restore();
-      // Highlight the sloped edge.
-      ctx.strokeStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
-      ctx.lineWidth = Math.max(1, size * 0.1);
-      ctx.beginPath();
-      if (shape.slope === "left") { ctx.moveTo(sx, sy + size); ctx.lineTo(sx + size, sy); }
-      else { ctx.moveTo(sx, sy); ctx.lineTo(sx + size, sy + size); }
-      ctx.stroke();
-      return;
+    } else {
+      ctx.drawImage(sprite, sx, sy, draw, draw);
     }
-
-    ctx.drawImage(sprite, sx, sy, draw, draw);
 
     // Edge bevels where exposed to open space.
     const bev = Math.max(1, Math.round(size * 0.14));
-    if (shape.top) {
-      ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
-      ctx.fillRect(sx, sy, size, bev);
-    }
-    if (shape.left) {
-      ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT * 0.7})`;
-      ctx.fillRect(sx, sy, bev, size);
-    }
-    if (shape.bottom) {
-      ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK})`;
-      ctx.fillRect(sx, sy + size - bev, size, bev);
-    }
-    if (shape.right) {
-      ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK * 0.7})`;
-      ctx.fillRect(sx + size - bev, sy, bev, size);
-    }
+    if (shape.top) { ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT})`; ctx.fillRect(sx, sy, size, bev); }
+    if (shape.left) { ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT * 0.7})`; ctx.fillRect(sx, sy, bev, size); }
+    if (shape.bottom) { ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK})`; ctx.fillRect(sx, sy + size - bev, size, bev); }
+    if (shape.right) { ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK * 0.7})`; ctx.fillRect(sx + size - bev, sy, bev, size); }
 
-    // Overhang fringe over an exposed grassy/snowy/mossy top.
-    if (shape.top && hasOverhang(fg)) {
-      const oc = overhangColor(fg);
-      ctx.fillStyle = `rgb(${oc[0]},${oc[1]},${oc[2]})`;
-      const ohMax = (OVERHANG_PX / 16) * size;
-      const strands = Math.max(3, Math.round(size / 5));
-      const sw = Math.max(1, size / (strands * 1.6));
-      for (let k = 0; k < strands; k++) {
-        const hx = hash2(tx * 13 + k, ty, 51);
-        const hh = hash2(tx, ty * 7 + k, 52);
-        const px = sx + hx * (size - sw);
-        const ph = ohMax * (0.45 + hh * 0.55);
-        ctx.fillRect(px, sy - ph, sw, ph);
-      }
+    if (shape.top && hasOverhang(fg)) this.drawOverhang(ctx, fg, tx, ty, sx, sy, size);
+  }
+
+  private drawSlopeTile(
+    ctx: CanvasRenderingContext2D,
+    sprite: HTMLCanvasElement,
+    sx: number,
+    sy: number,
+    size: number,
+    draw: number,
+    kind: SlopeKind,
+    fg: number,
+    tx: number,
+    ty: number,
+  ): void {
+    // Clip to the slope polygon, then draw the sprite inside it.
+    ctx.save();
+    ctx.beginPath();
+    let ex1 = sx, ey1 = sy, ex2 = sx + size, ey2 = sy; // slope edge endpoints
+    switch (kind) {
+      case "right45": // hypotenuse top-left → bottom-right, keep lower-left triangle
+        ctx.moveTo(sx, sy); ctx.lineTo(sx, sy + size); ctx.lineTo(sx + size, sy + size);
+        ex1 = sx; ey1 = sy; ex2 = sx + size; ey2 = sy + size;
+        break;
+      case "left45": // hypotenuse bottom-left → top-right, keep lower-right triangle
+        ctx.moveTo(sx + size, sy); ctx.lineTo(sx + size, sy + size); ctx.lineTo(sx, sy + size);
+        ex1 = sx; ey1 = sy + size; ex2 = sx + size; ey2 = sy;
+        break;
+      case "right22": // gentle: top-left full, top-right half
+        ctx.moveTo(sx, sy); ctx.lineTo(sx + size, sy + size * 0.5);
+        ctx.lineTo(sx + size, sy + size); ctx.lineTo(sx, sy + size);
+        ex1 = sx; ey1 = sy; ex2 = sx + size; ey2 = sy + size * 0.5;
+        break;
+      case "left22":
+        ctx.moveTo(sx, sy + size * 0.5); ctx.lineTo(sx + size, sy);
+        ctx.lineTo(sx + size, sy + size); ctx.lineTo(sx, sy + size);
+        ex1 = sx; ey1 = sy + size * 0.5; ex2 = sx + size; ey2 = sy;
+        break;
+      default:
+        break;
     }
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(sprite, sx, sy, draw, draw);
+    ctx.restore();
+
+    // Grass/moss/snow draped along the slope face, else a light edge highlight.
+    ctx.lineCap = "round";
+    if (hasOverhang(fg)) {
+      const oc = overhangColor(fg);
+      ctx.strokeStyle = `rgb(${oc[0]},${oc[1]},${oc[2]})`;
+      ctx.lineWidth = Math.max(2, size * 0.22);
+    } else {
+      ctx.strokeStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
+      ctx.lineWidth = Math.max(1, size * 0.12);
+    }
+    ctx.beginPath();
+    ctx.moveTo(ex1, ey1);
+    ctx.lineTo(ex2, ey2);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+    void tx; void ty;
+  }
+
+  private drawOverhang(
+    ctx: CanvasRenderingContext2D,
+    fg: number,
+    tx: number,
+    ty: number,
+    sx: number,
+    sy: number,
+    size: number,
+  ): void {
+    const oc = overhangColor(fg);
+    ctx.fillStyle = `rgb(${oc[0]},${oc[1]},${oc[2]})`;
+    const ohMax = (OVERHANG_PX / 16) * size;
+    const strands = Math.max(4, Math.round(size / 4));
+    const sw = Math.max(1, size / (strands * 1.5));
+    for (let k = 0; k < strands; k++) {
+      const hx = hash2(tx * 13 + k, ty, 51);
+      const hh = hash2(tx, ty * 7 + k, 52);
+      const px = sx + hx * (size - sw);
+      const ph = ohMax * (0.4 + hh * 0.7);
+      ctx.fillRect(px, sy - ph, sw, ph);
+    }
+  }
+
+  private drawDeco(
+    ctx: CanvasRenderingContext2D,
+    sprite: HTMLCanvasElement,
+    sx: number,
+    sy: number,
+    size: number,
+    fg: number,
+  ): void {
+    // Torches/lanterns fill more of the cell; plants sit on the ground, upright.
+    void fg;
+    ctx.drawImage(sprite, sx, sy, size, size);
   }
 
   private drawPlayer(camera: Camera, player: Player): void {
