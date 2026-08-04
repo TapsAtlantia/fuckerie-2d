@@ -107,6 +107,21 @@ export class StructureSystem {
     // Determine structure type based on depth and random
     const worldX = cx * this.CELL_SIZE;
     const worldY = cy * this.CELL_SIZE;
+
+    // Context culling so the world isn't crowded: sky is very rare, underground occasional, and
+    // surface structures cluster in settlement regions (sparse wilderness elsewhere).
+    const h2 = hash2(cx, cy, this.seed + 555);
+    if (worldY < BAND.SKY) {
+      if (h2 > 0.12) return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
+    } else if (worldY >= 40) {
+      if (h2 > 0.45) return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
+    } else {
+      const settlement = this.noise.fbm2D(worldX * this.SETTLEMENT_SCALE, 0, 2);
+      if (settlement < 0.2 && h2 > 0.35) {
+        return { cx, cy, hasStructure: false, type: "none", originX: 0, originY: 0, seed: 0 };
+      }
+    }
+
     const type = this.selectStructureType(worldX, worldY, h);
 
     // Jittered X origin within the cell.

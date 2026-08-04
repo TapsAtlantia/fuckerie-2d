@@ -243,10 +243,44 @@ export class LayeredNoiseSystem {
     const warpY = y + this.continental.noise2D(x * 0.01 + 50, y * 0.01 + 50) * 50;
     
     const canyon = this.regional.fbm2D(warpX * 0.002, warpY * 0.002, 3);
-    
+
     // Create sharp canyon where noise is near zero
     const canyonMask = 1 - Math.abs(canyon);
     return Math.max(0, canyonMask * 50);
+  }
+
+  /**
+   * Composited surface elevation in tiles (higher value = higher altitude). A gentle rolling
+   * baseline everywhere (walking-scale hills for liveliness), plus regional mountain ranges and
+   * valleys driven by a smooth "tectonic" field — so the world reads like a real planet where
+   * landforms vary by region, not a uniform flat plain.
+   */
+  surfaceElevation(x: number): number {
+    const base = this.continental.fbm2D(x * 0.00006, 0, 4) * 60; // broad continents
+    const region = this.regional.fbm2D(x * 0.0004 + 20, 0, 4) * 30; // regional swells
+
+    // Roughness field flattens some stretches (plains) and lets others be hillier — walking-scale
+    // liveliness so the ground is never a dead-flat plain.
+    const rough = 0.5 + 0.5 * (this.micro.fbm2D(x * 0.0009 + 7, 0, 2) * 0.5 + 0.5);
+    const hills =
+      (this.local.fbm2D(x * 0.006, 0, 3) * 22 +
+        this.local.fbm2D(x * 0.02 + 9, 0, 3) * 12 +
+        this.local.fbm2D(x * 0.05 + 3, 0, 2) * 5) * rough;
+
+    // Tectonic field: mostly gentle, but where it's high a ridged mountain range rises, and where
+    // it's low the ground sinks into basins/valleys. (fBm output is modest in magnitude, so the
+    // threshold is low and the amplitude large to actually produce real peaks.)
+    const tect = this.regional.fbm2D(x * 0.00016 + 50, 0, 3);
+    let landform = 0;
+    if (tect > 0.15) {
+      const m = Math.min(1, (tect - 0.15) / 0.35);
+      landform += this.regional.ridgedFbm2D(x * 0.0022, 0, 4) * 220 * m;
+    } else if (tect < -0.15) {
+      const v = Math.min(1, (-0.15 - tect) / 0.35);
+      landform -= (1 - Math.abs(this.regional.fbm2D(x * 0.001 + 5, 0, 3))) * 85 * v;
+    }
+
+    return base + region + hills + landform;
   }
 }
 

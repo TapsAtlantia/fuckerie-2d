@@ -41,13 +41,9 @@ export class WorldGen {
 
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
   surfaceHeight(worldX: number): number {
-    // Biome-aware elevation with continuous amplitude transitions
-    const amplitude = this.biomeSystem.surfaceAmplitudeAt(worldX);
-    
-    // Use layered noise for more varied terrain
-    const terrain = this.layeredNoise.terrainHeight(worldX, 0, amplitude);
-    
-    return Math.floor(terrain);
+    // Higher elevation → smaller (more negative) world-Y, since +Y is down. The elevation field
+    // gives a gentle rolling baseline plus regional mountains/valleys (natural-planet terrain).
+    return Math.floor(-this.layeredNoise.surfaceElevation(worldX));
   }
 
   /** Get the appropriate stone variant for a given depth and position. */
@@ -69,21 +65,31 @@ export class WorldGen {
     const biomeCache: (Biome & { appliedModifiers?: string[] })[] = new Array(CHUNK_SIZE);
     const surfaceHeightCache: number[] = new Array(CHUNK_SIZE);
     const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
+    const topBlockCache: TileId[] = new Array(CHUNK_SIZE);
+    const caveFloorCache: number[] = new Array(CHUNK_SIZE);
     const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const worldX = baseX + lx;
       let biome = this.biomeSystem.surfaceBiomeAt(worldX);
-      
+
       // Apply biome modifiers
       biome = this.biomeModifierSystem.applyModifiers(biome, worldX, baseY, baseY);
-      
+
       biomeCache[lx] = biome;
       surfaceHeightCache[lx] = this.surfaceHeight(worldX);
-      dirtDepthCache[lx] = biomeCache[lx].subSurfaceDepth + Math.floor(
-        (this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2
-      );
-      
+
+      // Realistic stratigraphy: topsoil thins on steep slopes (erosion), and very steep faces
+      // expose rock/gravel (talus) instead of the biome's soft top block.
+      const slope = Math.abs(this.surfaceHeight(worldX + 2) - this.surfaceHeight(worldX - 2));
+      const jitter = Math.floor((this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2);
+      dirtDepthCache[lx] = Math.max(1, biome.subSurfaceDepth + jitter - Math.floor(slope / 2.5));
+      if (slope >= 10) topBlockCache[lx] = biome.stoneVariant;
+      else if (slope >= 6) topBlockCache[lx] = TileId.Gravel;
+      else topBlockCache[lx] = biome.topBlock;
+
+      caveFloorCache[lx] = this.caveSystem.caveFloor(worldX);
+
       // Check for micro-biomes (coarse check per column)
       microBiomeCache[lx] = null; // Will be checked per-tile for precision
     }
@@ -120,19 +126,17 @@ export class WorldGen {
         // Foreground material by depth and biome
         let fg: TileId;
         if (worldY === surfaceY) {
-          fg = biome.topBlock;
+          fg = topBlockCache[lx];
         } else if (belowSurface < dirtDepth) {
           fg = biome.subSurfaceBlock;
         } else {
           fg = this.stoneForDepth(worldX, worldY);
         }
 
-        // Carve caves using the new cave system
-        if (belowSurface > 3) {
-          const caveStyle = biome.caveStyle;
-          if (this.caveSystem.caveAt(worldX, worldY, caveStyle)) {
-            fg = TileId.Air;
-          }
+        // Carve caves below the crust; in rare "entrance" columns the floor drops to 1 so a cave
+        // that reaches the surface opens as an organic mouth (only where a tunnel actually exists).
+        if (belowSurface > caveFloorCache[lx] && this.caveSystem.caveAt(worldX, worldY, biome.caveStyle)) {
+          fg = TileId.Air;
         }
 
         // Place ores in stone only (not dirt/sand/grass/cloud).
@@ -174,8 +178,9 @@ export class WorldGen {
           chunk.fg[aboveLy * CHUNK_SIZE + lx] === TileId.Air
         ) {
           const surfaceBlock = chunk.fg[ly * CHUNK_SIZE + lx];
+          const rockyTop = surfaceBlock === TileId.Gravel || tile(surfaceBlock).category === "stone";
           const h = hash2(worldX, surfaceY, this.seed + 777);
-          if (h < biome.plantDensity) {
+          if (!rockyTop && h < biome.plantDensity) {
             const plantIndex = Math.floor(h * biome.plants.length * 10) % biome.plants.length;
             const plant = biome.plants[plantIndex];
             const onSand = surfaceBlock === TileId.Sand;

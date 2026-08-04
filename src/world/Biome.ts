@@ -260,36 +260,42 @@ export class BiomeSystem {
   }
   
   private selectPrimaryBiome(temp: number, humidity: number, worldX: number): Biome {
-    // Whittaker diagram mapping with additional mountain/volcanic logic
-    const elevation = this.layeredNoise.terrainHeight(worldX, 0, 1); // Use noise for mountain check
-    
+    // Whittaker diagram mapping, coupled to the real elevation field so mountains sit on high
+    // ground — coherent, planet-like biome placement. Named indices avoid the earlier mismatch
+    // between SURFACE_BIOMES order and the returned biome.
+    const DESERT = 0, SAVANNA = 1, PLAINS = 2, FOREST = 3, JUNGLE = 4, SWAMP = 5;
+    const MOUNTAIN = 6, VOLCANIC = 7, SNOWY = 8, TUNDRA = 9;
+    const elevation = this.layeredNoise.surfaceElevation(worldX);
+
     if (temp > 0.6) {
-      // Very hot - volcanic possible
-      if (humidity < -0.4) return SURFACE_BIOMES[0]; // desert
-      if (humidity < 0.1) return SURFACE_BIOMES[1]; // savanna
-      if (elevation > 80) return SURFACE_BIOMES[9]; // volcanic (on peaks)
-      return SURFACE_BIOMES[4]; // jungle
+      // Very hot
+      if (elevation > 85) return SURFACE_BIOMES[VOLCANIC]; // scorched peaks
+      if (humidity < -0.4) return SURFACE_BIOMES[DESERT];
+      if (humidity < 0.1) return SURFACE_BIOMES[SAVANNA];
+      return SURFACE_BIOMES[JUNGLE];
     } else if (temp > 0.4) {
       // Hot
-      if (humidity < -0.3) return SURFACE_BIOMES[0]; // desert
-      if (humidity < 0.2) return SURFACE_BIOMES[1]; // savanna
-      return SURFACE_BIOMES[4]; // jungle
+      if (elevation > 90) return SURFACE_BIOMES[MOUNTAIN]; // rocky peaks
+      if (humidity < -0.3) return SURFACE_BIOMES[DESERT];
+      if (humidity < 0.2) return SURFACE_BIOMES[SAVANNA];
+      return SURFACE_BIOMES[JUNGLE];
     } else if (temp > -0.2) {
       // Temperate
-      if (elevation > 60) return SURFACE_BIOMES[8]; // mountain (on peaks)
-      if (humidity < -0.2) return SURFACE_BIOMES[1]; // savanna
-      if (humidity < 0.3) return SURFACE_BIOMES[2]; // plains
-      if (humidity < 0.7) return SURFACE_BIOMES[3]; // forest
-      return SURFACE_BIOMES[5]; // swamp
+      if (elevation > 70) return SURFACE_BIOMES[MOUNTAIN];
+      if (humidity < -0.2) return SURFACE_BIOMES[SAVANNA];
+      if (humidity < 0.3) return SURFACE_BIOMES[PLAINS];
+      if (humidity < 0.7) return SURFACE_BIOMES[FOREST];
+      return SURFACE_BIOMES[SWAMP];
     } else if (temp > -0.5) {
-      // Cool - mountain possible
-      if (elevation > 40) return SURFACE_BIOMES[8]; // mountain
-      if (humidity < 0) return SURFACE_BIOMES[7]; // tundra
-      return SURFACE_BIOMES[6]; // snowy
+      // Cool
+      if (elevation > 60) return SURFACE_BIOMES[MOUNTAIN];
+      if (humidity < 0) return SURFACE_BIOMES[TUNDRA];
+      return SURFACE_BIOMES[SNOWY];
     } else {
       // Cold
-      if (humidity < 0) return SURFACE_BIOMES[7]; // tundra
-      return SURFACE_BIOMES[6]; // snowy
+      if (elevation > 70) return SURFACE_BIOMES[MOUNTAIN]; // snowy peaks
+      if (humidity < 0) return SURFACE_BIOMES[TUNDRA];
+      return SURFACE_BIOMES[SNOWY];
     }
   }
   

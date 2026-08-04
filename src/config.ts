@@ -59,7 +59,8 @@ export const BIOME = {
 
 // Phase 2: Cave parameters --------------------------------------------------
 export const CAVE = {
-  REGION_SCALE: 0.00015, // scale of cave region mask (very low frequency)
+  REGION_SCALE: 0.004, // scale of cave-region mask: ~250-tile 2D pockets (varies with depth too,
+  // so caves appear at shallow depths — not gated into huge vertical dead-zones)
   BASE_SCALE: 0.04, // scale of domain-warped noise
   WARP_SCALE: 0.02, // scale of domain warping
   WORM_SCALE: 0.03, // scale of worm tunnel noise
@@ -75,9 +76,9 @@ export const ORE = {
 
 // Phase 2: Structure parameters ---------------------------------------------
 export const STRUCTURE = {
-  CELL_SIZE: 48, // tiles per structure cell
+  CELL_SIZE: 64, // tiles per structure cell (larger = more spread out)
   SETTLEMENT_SCALE: 0.0002, // scale of settlement field for villages/cities
-  STRUCTURE_CHANCE: 0.3, // chance a cell has a structure
+  STRUCTURE_CHANCE: 0.06, // base chance a cell has a structure (further culled by context)
 } as const;
 
 // Phase 2: Inventory parameters ---------------------------------------------

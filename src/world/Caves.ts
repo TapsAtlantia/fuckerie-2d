@@ -20,13 +20,14 @@ export class CaveSystem {
    * Combines domain-warped fBm, worm tunnels, open caverns, and cave-region masks.
    */
   caveAt(worldX: number, worldY: number, style: CaveStyle): boolean {
-    // Cave-region mask: very low frequency to cluster caves into systems
+    // Cave-region mask: very low frequency to cluster caves into systems (keeps solid stretches
+    // between them so caves read as systems, not a uniform sponge/grid).
     const regionMask = this.regionMask(worldX, worldY);
-    if (regionMask < 0.2) return false; // solid stretches between cave systems
+    if (regionMask < 0.14) return false;
 
     // Base cave width varies by depth and style
     const baseWidth = this.baseCaveWidth(worldY, style);
-    
+
     // Domain-warped fBm for organic walls
     const warped = this.domainWarpedNoise(worldX, worldY);
     if (Math.abs(warped) < baseWidth * 0.7) return true;
@@ -37,10 +38,18 @@ export class CaveSystem {
     // Open caverns in deeper layers
     if (worldY >= BAND.CAVERN - 50 && this.openCavern(worldX, worldY, style)) return true;
 
-    // Surface entrances: occasional breaches near surface
-    if (this.surfaceEntrance(worldX, worldY)) return true;
-
     return false;
+  }
+
+  /**
+   * Minimum depth-below-surface at which caves may carve for this column. Normally a few tiles
+   * (keeps a solid surface crust). In rare "entrance" regions it drops to 1 so a cave that
+   * genuinely rises to the surface breaks through as an organic mouth — following the existing
+   * tunnel, never a punched vertical hole (carving still requires `caveAt` to be true there).
+   */
+  caveFloor(worldX: number): number {
+    const e = this.noise.fbm2D(worldX * 0.0038 + 300, 17.3, 2);
+    return e > 0.5 ? 1 : 3;
   }
 
   /** Very low-frequency mask so caves cluster into systems. */
@@ -52,8 +61,9 @@ export class CaveSystem {
   private baseCaveWidth(worldY: number, style: CaveStyle): number {
     const depth = Math.max(0, worldY);
     
-    // Caves get larger with depth
-    let width = 0.05 + depth * 0.000015;
+    // Caves get larger with depth; a healthy base width means shallow caves are real (reachable)
+    // instead of forcing you to dig deep to find anything.
+    let width = 0.085 + depth * 0.00002;
     
     // Style modifiers
     switch (style) {
@@ -114,21 +124,5 @@ export class CaveSystem {
     
     const n = this.noise.fbm2D(worldX * CAVE.OPEN_CAVERN_SCALE, worldY * CAVE.OPEN_CAVERN_SCALE, 3);
     return n > threshold;
-  }
-
-  /** Surface entrances: occasional breaches near the surface. */
-  private surfaceEntrance(worldX: number, worldY: number): boolean {
-    // Only near surface (5-20 tiles below)
-    if (worldY < 5 || worldY > 20) return false;
-
-    // Deterministic check using hash
-    const h = hash2(worldX, worldY, this.seed);
-    if (h > (1 - CAVE.SURFACE_ENTRANCE_CHANCE)) { // 3% chance per column
-      // Check if this column has a cave below
-      const belowCave = this.caveAt(worldX, worldY + 5, "normal");
-      return belowCave;
-    }
-
-    return false;
   }
 }
