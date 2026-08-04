@@ -13,6 +13,7 @@ import {
   hasOverhang,
   isSolid,
   overhangColor,
+  tile,
 } from "../world/Tile";
 import { hash2 } from "../world/Noise";
 import { computeSlope, shapeFrom, type SlopeKind } from "../render/Autotile";
@@ -182,32 +183,102 @@ export class Renderer {
       return;
     }
 
-    // Square block, optionally chamfered at a cliff/peak corner for an organic silhouette.
-    if (slope.roundTL || slope.roundTR) {
-      const c = size * 0.32;
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(sx + (slope.roundTL ? c : 0), sy);
-      ctx.lineTo(sx + size - (slope.roundTR ? c : 0), sy);
-      if (slope.roundTR) ctx.lineTo(sx + size, sy + c);
-      ctx.lineTo(sx + size, sy + size);
-      ctx.lineTo(sx, sy + size);
-      if (slope.roundTL) ctx.lineTo(sx, sy + c);
-      ctx.closePath();
-      ctx.clip();
+    // Fully-enclosed interior tiles just blit (the common case, fast — and they meld with neighbours).
+    if (!shape.top && !shape.left && !shape.right && !shape.bottom) {
       ctx.drawImage(sprite, sx, sy, draw, draw);
-      ctx.restore();
-    } else {
-      ctx.drawImage(sprite, sx, sy, draw, draw);
+      return;
     }
 
-    // Edge bevels where exposed to open space.
+    // Terrain gets an organic silhouette (bumpy top edge + rounded exposed corners) so blocks meld
+    // together like Terraria; built structure blocks stay crisp and square.
+    if (tile(fg).category !== "structure") {
+      this.drawTerrainTile(ctx, camera, sx, sy, size, sprite, shape, tx, ty, fg, draw);
+      return;
+    }
+
+    ctx.drawImage(sprite, sx, sy, draw, draw);
     const bev = Math.max(1, Math.round(size * 0.14));
     if (shape.top) { ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT})`; ctx.fillRect(sx, sy, size, bev); }
     if (shape.left) { ctx.fillStyle = `rgba(255,255,255,${BEVEL_LIGHT * 0.7})`; ctx.fillRect(sx, sy, bev, size); }
     if (shape.bottom) { ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK})`; ctx.fillRect(sx, sy + size - bev, size, bev); }
     if (shape.right) { ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK * 0.7})`; ctx.fillRect(sx + size - bev, sy, bev, size); }
+    if (shape.top && hasOverhang(fg)) this.drawOverhang(ctx, fg, tx, ty, sx, sy, size);
+  }
 
+  private topBump(wpx: number): number {
+    // Continuous (function of absolute world-x) so adjacent tiles' top edges connect seamlessly.
+    const s = 5;
+    const i = Math.floor(wpx / s);
+    const f = wpx / s - i;
+    const a = hash2(i, 900, 7);
+    const b = hash2(i + 1, 900, 7);
+    const t = f * f * (3 - 2 * f);
+    return (a + (b - a) * t) * 3; // 0..3 world px of downward "erosion"
+  }
+
+  private drawTerrainTile(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    sx: number,
+    sy: number,
+    size: number,
+    sprite: HTMLCanvasElement,
+    shape: { top: boolean; right: boolean; bottom: boolean; left: boolean },
+    tx: number,
+    ty: number,
+    fg: number,
+    draw: number,
+  ): void {
+    const z = camera.zoom;
+    const cw = TILE_SIZE * 0.3; // rounded-corner inset (world px), only on exposed convex corners
+    const rTL = shape.top && shape.left ? cw : 0;
+    const rTR = shape.top && shape.right ? cw : 0;
+    const rBL = shape.bottom && shape.left ? cw : 0;
+    const rBR = shape.bottom && shape.right ? cw : 0;
+    const wx0 = tx * TILE_SIZE;
+    const topYat = (l: number) => sy + (shape.top ? this.topBump(wx0 + l) : 0) * z;
+    const SEG = 5;
+    const startL = rTL;
+    const endL = TILE_SIZE - rTR;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(sx + startL * z, topYat(startL));
+    if (shape.top) {
+      for (let i = 1; i <= SEG; i++) { const l = startL + (endL - startL) * (i / SEG); ctx.lineTo(sx + l * z, topYat(l)); }
+    } else {
+      ctx.lineTo(sx + endL * z, sy);
+    }
+    if (rTR > 0) ctx.quadraticCurveTo(sx + size, sy, sx + size, sy + rTR * z);
+    else ctx.lineTo(sx + size, sy);
+    ctx.lineTo(sx + size, sy + size - rBR * z);
+    if (rBR > 0) ctx.quadraticCurveTo(sx + size, sy + size, sx + size - rBR * z, sy + size);
+    else ctx.lineTo(sx + size, sy + size);
+    ctx.lineTo(sx + rBL * z, sy + size);
+    if (rBL > 0) ctx.quadraticCurveTo(sx, sy + size, sx, sy + size - rBL * z);
+    else ctx.lineTo(sx, sy + size);
+    ctx.lineTo(sx, sy + rTL * z);
+    if (rTL > 0) ctx.quadraticCurveTo(sx, sy, sx + rTL * z, topYat(rTL));
+    else ctx.lineTo(sx, topYat(0));
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(sprite, sx, sy, draw, draw);
+    ctx.restore();
+
+    // Light along the bumpy top edge; soft shadow on an exposed underside.
+    if (shape.top) {
+      ctx.strokeStyle = `rgba(255,255,255,${BEVEL_LIGHT})`;
+      ctx.lineWidth = Math.max(1, size * 0.09);
+      ctx.beginPath();
+      ctx.moveTo(sx + startL * z, topYat(startL));
+      for (let i = 1; i <= SEG; i++) { const l = startL + (endL - startL) * (i / SEG); ctx.lineTo(sx + l * z, topYat(l)); }
+      ctx.stroke();
+    }
+    if (shape.bottom) {
+      const s = Math.max(1, size * 0.12);
+      ctx.fillStyle = `rgba(0,0,0,${BEVEL_DARK * 0.6})`;
+      ctx.fillRect(sx, sy + size - s, size, s);
+    }
     if (shape.top && hasOverhang(fg)) this.drawOverhang(ctx, fg, tx, ty, sx, sy, size);
   }
 

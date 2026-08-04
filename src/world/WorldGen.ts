@@ -8,6 +8,7 @@ import { OreSystem } from "./Ores";
 import { StructureSystem } from "./Structures";
 import { MicroBiomeSystem } from "./MicroBiomes";
 import { BiomeModifierSystem } from "./BiomeModifiers";
+import { TreeSystem } from "./Trees";
 
 // Procedural terrain. Pure function of (seed, worldX, worldY): the same coordinate always
 // generates the same tile no matter how the player reached it, which is what lets the world
@@ -25,6 +26,7 @@ export class WorldGen {
   private structureSystem: StructureSystem;
   private microBiomeSystem: MicroBiomeSystem;
   private biomeModifierSystem: BiomeModifierSystem;
+  private treeSystem: TreeSystem;
   readonly seed: number;
 
   constructor(seed: number) {
@@ -35,6 +37,11 @@ export class WorldGen {
     this.caveSystem = new CaveSystem(seed);
     this.oreSystem = new OreSystem(seed);
     this.structureSystem = new StructureSystem(seed, this.noise, (x) => this.surfaceHeight(x));
+    this.treeSystem = new TreeSystem(
+      seed,
+      (x) => this.surfaceHeight(x),
+      (x) => this.biomeSystem.surfaceBiomeAt(x),
+    );
     this.microBiomeSystem = new MicroBiomeSystem(seed);
     this.biomeModifierSystem = new BiomeModifierSystem(seed);
   }
@@ -190,6 +197,12 @@ export class WorldGen {
           }
         }
       }
+    }
+
+    // Trees (grow up from the surface; only overwrite air).
+    const treeOverrides = this.treeSystem.treeOverridesForChunk(cx, cy);
+    for (const [idx, fg] of treeOverrides) {
+      if (chunk.fg[idx] === TileId.Air) chunk.fg[idx] = fg;
     }
 
     // Apply structure overrides

@@ -77,6 +77,10 @@ export class TileSprites {
     else if (id === TileId.Cactus) this.cactus(ctx);
     else if (cat === "ore") this.oreFlecks(ctx, id, variant);
     else if (cat === "gem") this.gem(ctx, col);
+    else if (
+      id === TileId.Stone || id === TileId.DeepStone || id === TileId.Limestone ||
+      id === TileId.Basalt || id === TileId.Sandstone || id === TileId.Hellstone
+    ) this.rockClumps(ctx, col, variant);
 
     return cv;
   }
@@ -147,6 +151,23 @@ export class TileSprites {
       const x = 2 + Math.floor(hx * (this.px - 5));
       const y = 2 + Math.floor(hy * (this.px - 5));
       ctx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  private rockClumps(ctx: CanvasRenderingContext2D, col: RGB, variant: number): void {
+    // Rounded pebble clusters so stone reads as organic "cubic" chunks rather than a flat square.
+    const spots: Array<[number, number, number]> = [
+      [3, 4, 3], [10, 3, 3], [6, 9, 4], [12, 12, 3], [2, 12, 3],
+    ];
+    for (let k = 0; k < spots.length; k++) {
+      const [bx, by, br] = spots[k];
+      const jx = (hash2(bx + variant * 5, by, 21) - 0.5) * 2;
+      const jy = (hash2(by + variant * 5, bx, 22) - 0.5) * 2;
+      const x = bx + jx, y = by + jy;
+      ctx.fillStyle = shade(col, 0.8);
+      ctx.beginPath(); ctx.arc(x, y, br, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = shade(col, 1.12);
+      ctx.beginPath(); ctx.arc(x - 0.7, y - 0.7, br * 0.5, 0, Math.PI * 2); ctx.fill();
     }
   }
 

@@ -94,7 +94,40 @@ export class Player {
     }
 
     this.stepX(world, dt);
+    // Auto step-up: if walking into a low ledge/stair while grounded, climb it smoothly instead
+    // of stopping dead (so gentle slopes and single steps are walkable, not jump-required).
+    if (dir !== 0 && this.onGround && this.vx === 0) this.stepUp(world, dir);
     this.stepY(world, dt);
+  }
+
+  /** Try to rise onto a ledge (up to ~1 tile) directly ahead so the player keeps walking. */
+  private stepUp(world: ChunkManager, dir: number): void {
+    const maxLift = TILE_SIZE + 2; // at most ~1 tile high
+    const savedY = this.y;
+    for (let lift = 2; lift <= maxLift; lift += 2) {
+      const testX = this.x + dir * 3;
+      const testY = savedY - lift;
+      if (!this.aabbCollides(world, testX, testY)) {
+        // There's a clear foothold up here — hop onto it and keep moving.
+        this.x = testX;
+        this.y = testY;
+        return;
+      }
+    }
+    this.y = savedY;
+  }
+
+  private aabbCollides(world: ChunkManager, x: number, y: number): boolean {
+    const tx0 = Math.floor(x / TILE_SIZE);
+    const tx1 = Math.floor((x + this.w - 0.001) / TILE_SIZE);
+    const ty0 = Math.floor(y / TILE_SIZE);
+    const ty1 = Math.floor((y + this.h - 0.001) / TILE_SIZE);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (world.isSolid(tx, ty)) return true;
+      }
+    }
+    return false;
   }
 
   /** Teleport (debug warp). Zeroes velocity so we don't inherit a huge fall speed. */
