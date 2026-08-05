@@ -77,6 +77,7 @@ export class TileSprites {
     else if (id === TileId.Cactus) this.cactus(ctx);
     else if (cat === "ore") this.oreFlecks(ctx, id, variant);
     else if (cat === "gem") this.gem(ctx, col);
+    else if (cat === "wall") this.wallDetail(ctx, id, col, variant);
     else if (
       id === TileId.Stone || id === TileId.DeepStone || id === TileId.Limestone ||
       id === TileId.Basalt || id === TileId.Sandstone || id === TileId.Hellstone
@@ -151,6 +152,27 @@ export class TileSprites {
       const x = 2 + Math.floor(hx * (this.px - 5));
       const y = 2 + Math.floor(hy * (this.px - 5));
       ctx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  private wallDetail(ctx: CanvasRenderingContext2D, id: number, col: RGB, variant: number): void {
+    if (id === TileId.WoodWall) { this.planks(ctx, col); return; }
+    if (id === TileId.StoneBrickWall || id === TileId.BrickWall) { this.brick(ctx, col); return; }
+    if (id === TileId.GlassWall) {
+      ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},0.35)`;
+      ctx.fillRect(0, 0, this.px, this.px);
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.beginPath(); ctx.moveTo(3, 12); ctx.lineTo(11, 3); ctx.stroke();
+      return;
+    }
+    // Natural walls: a rough, blotchy "cave wall" look — a few darker/lighter patches.
+    for (let k = 0; k < 6; k++) {
+      const hx = hash2(k + variant * 3, id, 61);
+      const hy = hash2(id, k + variant * 3, 62);
+      const x = Math.floor(hx * (this.px - 3));
+      const y = Math.floor(hy * (this.px - 3));
+      ctx.fillStyle = shade(col, k % 2 === 0 ? 0.78 : 1.14);
+      ctx.fillRect(x, y, 3, 2);
     }
   }
 

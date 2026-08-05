@@ -1,7 +1,7 @@
 import { BAND, CHUNK_SIZE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
-import { TileId, tile } from "./Tile";
+import { TileId, naturalWall, tile } from "./Tile";
 import { LMAX, LAVA_LEVEL_Y, makeLiquid } from "./Liquid";
 import { BiomeSystem, type Biome } from "./Biome";
 import { CaveSystem } from "./Caves";
@@ -126,10 +126,11 @@ export class WorldGen {
           continue;
         }
 
-        // Background wall exists everywhere below the surface
+        // Natural background WALL behind the terrain (stays when caves carve the foreground, so
+        // caves read as carved-out rooms with a wall behind them like Terraria).
         const belowSurface = worldY - surfaceY;
-        chunk.bg[ly * CHUNK_SIZE + lx] =
-          belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY);
+        const wallMaterial = belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY);
+        chunk.bg[ly * CHUNK_SIZE + lx] = naturalWall(wallMaterial);
 
         // Foreground material by depth and biome
         let fg: TileId;

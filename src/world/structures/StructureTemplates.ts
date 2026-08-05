@@ -25,25 +25,25 @@ const A = TileId.Air;
 export function legend(ch: string): CellDef | null {
   switch (ch) {
     case " ": return null; // skip: leave the terrain as-is
-    case ".": return { fg: A, bg: TileId.Planks }; // interior air, wood back-wall
-    case ",": return { fg: A, bg: TileId.StoneBrick }; // interior air, stone back-wall
-    case "#": return { fg: TileId.StoneBrick, bg: TileId.StoneBrick };
-    case "%": return { fg: TileId.Cobblestone, bg: TileId.Cobblestone };
-    case "=": return { fg: TileId.Planks, bg: TileId.Planks };
-    case "_": return { fg: TileId.Planks, bg: TileId.Planks }; // floor
-    case "|": return { fg: TileId.OakLog, bg: TileId.Planks }; // post/beam
+    case ".": return { fg: A, bg: TileId.WoodWall }; // interior air, wood back-wall
+    case ",": return { fg: A, bg: TileId.StoneBrickWall }; // interior air, stone back-wall
+    case "#": return { fg: TileId.StoneBrick, bg: TileId.StoneBrickWall };
+    case "%": return { fg: TileId.Cobblestone, bg: TileId.StoneBrickWall };
+    case "=": return { fg: TileId.Planks, bg: TileId.WoodWall };
+    case "_": return { fg: TileId.Planks, bg: TileId.WoodWall }; // floor
+    case "|": return { fg: TileId.OakLog, bg: TileId.WoodWall }; // post/beam
     case "r": return { fg: TileId.Planks, bg: A }; // wood roof (sky behind)
     case "^": return { fg: TileId.Cobblestone, bg: A }; // stone roof
     case "o": return { fg: TileId.Cobblestone, bg: A }; // exposed stone (well ring, etc.)
     case "s": return { fg: TileId.SkyStone, bg: A };
     case "C": return { fg: TileId.CloudStone, bg: A };
-    case "G": return { fg: TileId.Glass, bg: TileId.Planks }; // window
-    case "O": return { fg: A, bg: TileId.Glass }; // glass back-pane (lets light in)
-    case "D": return { fg: A, bg: TileId.Planks }; // doorway (open)
-    case "T": return { fg: TileId.Torch, bg: TileId.Planks };
-    case "L": return { fg: TileId.Lantern, bg: TileId.Planks };
-    case "H": return { fg: TileId.Hay, bg: TileId.Planks }; // bed
-    case "K": return { fg: TileId.Bookshelf, bg: TileId.Planks };
+    case "G": return { fg: TileId.Glass, bg: TileId.WoodWall }; // window
+    case "O": return { fg: A, bg: TileId.GlassWall }; // glass back-pane (lets light in)
+    case "D": return { fg: A, bg: TileId.WoodWall }; // doorway (open)
+    case "T": return { fg: TileId.Torch, bg: TileId.WoodWall };
+    case "L": return { fg: TileId.Lantern, bg: TileId.WoodWall };
+    case "H": return { fg: TileId.Hay, bg: TileId.WoodWall }; // bed
+    case "K": return { fg: TileId.Bookshelf, bg: TileId.WoodWall };
     case "*": return { fg: TileId.Crystal, bg: A };
     default: return null;
   }

@@ -135,7 +135,7 @@ export class StructureSystem {
         const colGround = this.surfaceHeightFn(worldX);
         for (let wy = floorY + 1; wy <= colGround; wy++) {
           if (worldX < cwX || worldX >= cwX + CHUNK_SIZE || wy < cwY || wy >= cwY + CHUNK_SIZE) continue;
-          overrides.set(`${worldX - cwX},${wy - cwY}`, { fg: TileId.Cobblestone, bg: TileId.Cobblestone });
+          overrides.set(`${worldX - cwX},${wy - cwY}`, { fg: TileId.Cobblestone, bg: TileId.StoneWall });
         }
       }
     }

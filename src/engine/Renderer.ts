@@ -12,6 +12,7 @@ import {
   connectsForAutotile,
   hasOverhang,
   isSolid,
+  isWall,
   overhangColor,
   tile,
 } from "../world/Tile";
@@ -103,9 +104,17 @@ export class Renderer {
         if (fg !== TileId.Air && fg !== TileId.Glass) continue; // wall hidden behind a block
         const sx = camera.worldToScreenX(tx * TILE_SIZE);
         const sprite = this.sprites.get(bg, this.variantAt(tx, ty));
-        if (sprite) ctx.drawImage(sprite, sx, sy, draw, draw);
-        ctx.fillStyle = `rgba(6,8,16,${1 - WALL_DARKEN})`;
-        ctx.fillRect(sx, sy, draw, draw);
+        if (!sprite) continue;
+        ctx.drawImage(sprite, sx, sy, draw, draw);
+        if (isWall(bg)) {
+          // Recessed inner shadow where the wall borders open space or a block face — this "wall
+          // autotiling" makes walls read as being behind the foreground (Terraria-style depth).
+          this.wallShade(ctx, world, tx, ty, sx, sy, size);
+        } else {
+          // Non-wall bg (e.g. sky-island stone): the old flat darken.
+          ctx.fillStyle = `rgba(6,8,16,${1 - WALL_DARKEN})`;
+          ctx.fillRect(sx, sy, draw, draw);
+        }
       }
     }
 
@@ -151,6 +160,26 @@ export class Renderer {
 
   private variantAt(tx: number, ty: number): number {
     return (hash2(tx, ty, 0) * SPRITE_VARIANTS) | 0;
+  }
+
+  /** Soft inner shadow on wall edges that meet a block face or open (wall-less) space. */
+  private wallShade(
+    ctx: CanvasRenderingContext2D,
+    world: ChunkManager,
+    tx: number,
+    ty: number,
+    sx: number,
+    sy: number,
+    size: number,
+  ): void {
+    const bev = Math.max(1, size * 0.24);
+    const edge = (nx: number, ny: number): boolean =>
+      !isWall(world.getBg(nx, ny)) || isSolid(world.getFg(nx, ny));
+    ctx.fillStyle = "rgba(0,0,0,0.34)";
+    if (edge(tx, ty - 1)) ctx.fillRect(sx, sy, size, bev);
+    if (edge(tx, ty + 1)) ctx.fillRect(sx, sy + size - bev, size, bev);
+    if (edge(tx - 1, ty)) ctx.fillRect(sx, sy, bev, size);
+    if (edge(tx + 1, ty)) ctx.fillRect(sx + size - bev, sy, bev, size);
   }
 
   private drawLiquids(

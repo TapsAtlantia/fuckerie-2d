@@ -80,19 +80,34 @@ export const enum TileId {
   
   // Light sources
   Torch = 56,
+
+  // --- Phase 2: background walls (bg layer only; non-collidable). Append-only. ---
+  DirtWall = 57,
+  StoneWall = 58,
+  GraniteWall = 59,
+  BasaltWall = 60,
+  SandstoneWall = 61,
+  MudWall = 62,
+  SnowWall = 63,
+  HellWall = 64,
+  WoodWall = 65,
+  StoneBrickWall = 66,
+  BrickWall = 67,
+  GlassWall = 68,
 }
 
-export type TileCategory = 
-  | "natural" 
-  | "stone" 
-  | "ore" 
-  | "wood" 
-  | "plant" 
-  | "sand" 
-  | "ice" 
-  | "structure" 
-  | "deco" 
-  | "gem";
+export type TileCategory =
+  | "natural"
+  | "stone"
+  | "ore"
+  | "wood"
+  | "plant"
+  | "sand"
+  | "ice"
+  | "structure"
+  | "deco"
+  | "gem"
+  | "wall"; // background wall tiles (bg layer only, non-collidable)
 
 export type TileTexture = "flat" | "dither" | "twoTone" | "fleck";
 
@@ -210,6 +225,20 @@ export const TILE_PROPS: readonly TileProps[] = [
   
   // Light sources
   { name: "torch", solid: false, hardness: 0.1, color: [240, 180, 90], lightEmit: 230, category: "structure", drop: TileId.Torch, texture: "flat" },
+
+  // Background walls (non-collidable; colours are the dark "behind" tone; drop handled later).
+  { name: "dirt wall", solid: false, hardness: 0.5, color: [72, 52, 36], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "stone wall", solid: false, hardness: 0.6, color: [58, 58, 68], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "granite wall", solid: false, hardness: 0.7, color: [70, 60, 58], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "basalt wall", solid: false, hardness: 0.7, color: [34, 32, 42], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "sandstone wall", solid: false, hardness: 0.6, color: [120, 104, 74], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "mud wall", solid: false, hardness: 0.5, color: [58, 42, 28], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "snow wall", solid: false, hardness: 0.5, color: [138, 150, 170], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "hell wall", solid: false, hardness: 0.8, color: [70, 30, 26], lightEmit: 0, category: "wall", drop: null, texture: "dither" },
+  { name: "wood wall", solid: false, hardness: 0.5, color: [74, 52, 32], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "stone brick wall", solid: false, hardness: 0.6, color: [66, 66, 74], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "brick wall", solid: false, hardness: 0.6, color: [92, 46, 42], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "glass wall", solid: false, hardness: 0.3, color: [120, 150, 180], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
 ];
 
 export function tile(id: number): TileProps {
@@ -218,6 +247,38 @@ export function tile(id: number): TileProps {
 
 export function isSolid(id: number): boolean {
   return TILE_PROPS[id]?.solid ?? false;
+}
+
+/** Whether a tile id is a background wall (lives in the bg layer, never collides). */
+export function isWall(id: number): boolean {
+  return TILE_PROPS[id]?.category === "wall";
+}
+
+/** The natural background wall that sits behind a given terrain material (0 = none, e.g. sky). */
+export function naturalWall(material: number): number {
+  switch (material) {
+    case TileId.Dirt: case TileId.Grass: case TileId.Podzol: case TileId.SnowyGrass:
+    case TileId.Clay: case TileId.Gravel:
+      return TileId.DirtWall;
+    case TileId.Mud: case TileId.JungleGrass:
+      return TileId.MudWall;
+    case TileId.Snow: case TileId.Ice:
+      return TileId.SnowWall;
+    case TileId.Sand: case TileId.Sandstone:
+      return TileId.SandstoneWall;
+    case TileId.Granite:
+      return TileId.GraniteWall;
+    case TileId.Basalt:
+      return TileId.BasaltWall;
+    case TileId.Hellstone: case TileId.Obsidian:
+      return TileId.HellWall;
+    case TileId.Stone: case TileId.DeepStone: case TileId.Limestone: case TileId.MossyStone:
+      return TileId.StoneWall;
+    case TileId.CloudStone: case TileId.SkyStone: case TileId.Air:
+      return 0; // sky / floating islands: open, no wall
+    default:
+      return TileId.StoneWall;
+  }
 }
 
 /** Get the fleck colour for ores (coloured specks on stone base). */
