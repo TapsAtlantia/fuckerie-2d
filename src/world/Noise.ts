@@ -2,6 +2,8 @@
 // prototype runs fully offline on GitHub Pages. Generation is a pure function of the
 // seed + coordinates, which is what makes the infinite world deterministic.
 
+import { PLATEAU } from "../config";
+
 const F2 = 0.5 * (Math.sqrt(3) - 1);
 const G2 = (3 - Math.sqrt(3)) / 6;
 
@@ -282,7 +284,20 @@ export class LayeredNoiseSystem {
       landform -= (1 - Math.abs(this.regional.fbm2D(x * 0.001 + 5, 0, 3))) * 85 * v;
     }
 
-    return base + region + hills + landform;
+    let elevation = base + region + hills + landform;
+
+    // Plateaus / mesas: in "plateau" regions, quantize the elevation into flat steps. This produces
+    // flat mesa tops with abrupt cliff edges at the step boundaries (instead of everything being a
+    // smooth slope), giving the surface real hard landforms. Blended by field strength so the effect
+    // fades in/out smoothly and never seams.
+    const pf = this.regional.fbm2D(x * PLATEAU.SCALE + 70, 0, 2);
+    if (pf > PLATEAU.THRESHOLD) {
+      const strength = Math.min(1, (pf - PLATEAU.THRESHOLD) / 0.3) * PLATEAU.STRENGTH;
+      const stepped = Math.round(elevation / PLATEAU.STEP) * PLATEAU.STEP;
+      elevation += (stepped - elevation) * strength;
+    }
+
+    return elevation;
   }
 }
 

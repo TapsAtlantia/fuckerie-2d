@@ -1,4 +1,4 @@
-import { BAND, CHUNK_SIZE } from "../config";
+import { BAND, CHUNK_SIZE, RIVER, BEACH } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, naturalWall, tile } from "./Tile";
@@ -50,8 +50,56 @@ export class WorldGen {
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
   surfaceHeight(worldX: number): number {
     // Higher elevation → smaller (more negative) world-Y, since +Y is down. The elevation field
-    // gives a gentle rolling baseline plus regional mountains/valleys (natural-planet terrain).
+    // gives a gentle rolling baseline plus regional mountains/valleys/plateaus (natural-planet
+    // terrain); rivers then carve a channel down into that surface.
+    const elev = this.layeredNoise.surfaceElevation(worldX);
+    return Math.floor(-elev) + this.riverCarve(worldX, elev);
+  }
+
+  /** The un-carved land height (river banks) at a column — used as the river's water-surface level. */
+  private bankHeight(worldX: number): number {
     return Math.floor(-this.layeredNoise.surfaceElevation(worldX));
+  }
+
+  /**
+   * How many tiles a deterministic river carves down at column x (0 = none). Rivers are occasional
+   * (gated by a low-frequency presence field), meander via a mid-frequency path field, and only cut
+   * into lowlands — never high peaks. A U-shaped channel: deepest at the centerline, shallow at the
+   * banks. Pure function of x, so every peer carves the identical river.
+   */
+  private riverCarve(worldX: number, elev: number): number {
+    if (elev > RIVER.MAX_ELEV) return 0; // no rivers on high mountains
+    const presence = this.noise.fbm2D(worldX * RIVER.PRESENCE_SCALE + 900, 0, 2);
+    if (presence < RIVER.PRESENCE_THRESHOLD) return 0; // this stretch has no river
+    const meander = this.noise.fbm2D(worldX * RIVER.MEANDER_SCALE + 12, 0, 3); // channel path
+    const d = RIVER.WIDTH - Math.abs(meander);
+    if (d <= 0) return 0; // outside the channel band
+    const t = d / RIVER.WIDTH; // 0 at bank → 1 at centerline
+    return Math.round(t * RIVER.DEPTH);
+  }
+
+  /**
+   * The world-Y of the water surface at column x (rivers + depression lakes), or +Infinity if the
+   * column holds no standing water. One source of truth for both the liquid fill and beach placement.
+   */
+  private waterTopAt(worldX: number): number {
+    const elev = this.layeredNoise.surfaceElevation(worldX);
+    const bank = Math.floor(-elev);
+    const carve = this.riverCarve(worldX, elev);
+    if (carve > 1) return bank + 1; // river: water sits just below the banks
+
+    // Depression lake: this column is a basin only if both sides are meaningfully higher ground,
+    // gated by a low-frequency lake field so most dips stay dry.
+    const here = bank + carve;
+    const W = 16;
+    const rimL = this.surfaceHeight(worldX - W);
+    const rimR = this.surfaceHeight(worldX + W);
+    if (here > rimL + 3 && here > rimR + 3 && this.noise.fbm2D(worldX * 0.0025 + 88, 3.1, 2) > 0.1) {
+      let level = Math.max(rimL, rimR) + 1; // water surface just below the lower spill rim
+      if (here - level > 24) level = here - 24; // cap lake depth
+      return level;
+    }
+    return Infinity;
   }
 
   /** Get the appropriate stone variant for a given depth and position. */
@@ -75,6 +123,8 @@ export class WorldGen {
     const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
     const topBlockCache: TileId[] = new Array(CHUNK_SIZE);
     const caveFloorCache: number[] = new Array(CHUNK_SIZE);
+    const waterTopCache: number[] = new Array(CHUNK_SIZE); // water-surface Y per column (Infinity = dry)
+    const beachCache: boolean[] = new Array(CHUNK_SIZE); // shore/bed column → sandy top
     const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -97,9 +147,29 @@ export class WorldGen {
       else topBlockCache[lx] = biome.topBlock;
 
       caveFloorCache[lx] = this.caveSystem.caveFloor(worldX);
+      waterTopCache[lx] = this.waterTopAt(worldX);
 
       // Check for micro-biomes (coarse check per column)
       microBiomeCache[lx] = null; // Will be checked per-tile for precision
+    }
+
+    // Beaches: a column is sandy if it is a lake/river bed (underwater) or a dry shore whose ground
+    // sits just above a nearby water level. Uses the per-column water cache (with direct lookups for
+    // the few neighbours beyond the chunk edge), so it stays a pure function of x.
+    const waterTopNear = (lx: number, k: number): number => {
+      const j = lx + k;
+      return j >= 0 && j < CHUNK_SIZE ? waterTopCache[j] : this.waterTopAt(baseX + j);
+    };
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const here = surfaceHeightCache[lx];
+      let beach = waterTopCache[lx] !== Infinity; // underwater bed
+      if (!beach) {
+        for (let k = -BEACH.RADIUS; k <= BEACH.RADIUS; k++) {
+          const wt = waterTopNear(lx, k);
+          if (wt !== Infinity && here - wt >= 0 && here - wt <= BEACH.BAND) { beach = true; break; }
+        }
+      }
+      beachCache[lx] = beach;
     }
 
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -142,6 +212,11 @@ export class WorldGen {
           fg = this.stoneForDepth(worldX, worldY);
         }
 
+        // Beach: the top band of shore/bed columns is sand.
+        if (beachCache[lx] && belowSurface < BEACH.BED_DEPTH) {
+          fg = TileId.Sand;
+        }
+
         // Carve caves below the crust; in rare "entrance" columns the floor drops to 1 so a cave
         // that reaches the surface opens as an organic mouth (only where a tunnel actually exists).
         if (belowSurface >= caveFloorCache[lx] && this.caveSystem.caveAt(worldX, worldY, biome.caveStyle)) {
@@ -177,15 +252,11 @@ export class WorldGen {
       const worldX = baseX + lx;
       const here = surfaceHeightCache[lx];
 
-      // A lake exists only where BOTH sides are higher ground (a real basin), gated by a
-      // low-frequency lake field so most dips stay dry. Water fills up to the lower spill rim.
-      const W = 16;
-      const rimL = this.surfaceHeight(worldX - W);
-      const rimR = this.surfaceHeight(worldX + W);
-      if (here > rimL + 3 && here > rimR + 3 && this.noise.fbm2D(worldX * 0.0025 + 88, 3.1, 2) > 0.1) {
-        let level = Math.max(rimL, rimR) + 1; // water surface just below the lower barrier
-        if (here - level > 24) level = here - 24; // cap lake depth
-        for (let wy = level; wy < here; wy++) {
+      // Standing water — both carved river channels and depression lakes — fills from its water
+      // surface (waterTopAt) down to the ground. One unified fill; all deterministic.
+      const waterTop = waterTopCache[lx];
+      if (waterTop !== Infinity && waterTop < here) {
+        for (let wy = waterTop; wy < here; wy++) {
           const ly = wy - baseY;
           if (ly < 0 || ly >= CHUNK_SIZE) continue;
           const idx = ly * CHUNK_SIZE + lx;

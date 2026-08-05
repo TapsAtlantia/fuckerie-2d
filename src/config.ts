@@ -66,6 +66,29 @@ export const CAVE = {
   WARP_SCALE: 0.02, // scale of domain warping
 } as const;
 
+// Phase 3: Surface landform realism — plateaus/mesas, rivers, beaches (all pure fn of world-x).
+export const PLATEAU = {
+  SCALE: 0.0009, // frequency of the plateau/mesa field
+  THRESHOLD: 0.28, // field must exceed this for a region to become a stepped mesa
+  STEP: 12, // elevation is quantized to this many tiles → flat tops + cliff edges
+  STRENGTH: 0.82, // how strongly the terrain snaps to the steps (0..1)
+} as const;
+
+export const RIVER = {
+  PRESENCE_SCALE: 0.0006, // frequency of the "does a river exist here" field
+  PRESENCE_THRESHOLD: 0.33, // above this → river region (occasional, not everywhere)
+  MEANDER_SCALE: 0.004, // frequency of the meandering channel path
+  WIDTH: 0.12, // |meander| below this is inside the channel band
+  DEPTH: 11, // max tiles the channel carves down at its center
+  MAX_ELEV: 70, // no rivers above this elevation (keeps them off high peaks)
+} as const;
+
+export const BEACH = {
+  RADIUS: 3, // how many columns out to look for adjacent water
+  BAND: 4, // dry ground within this many tiles above a nearby water level becomes sand
+  BED_DEPTH: 3, // sand depth for shores/beds
+} as const;
+
 // Phase 2: Ore parameters ---------------------------------------------------
 export const ORE = {
   LATTICE_SIZE: 16, // tiles between vein centers

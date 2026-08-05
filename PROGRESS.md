@@ -17,7 +17,7 @@ ids append-only.
 ## Book I — World & Structure Generation
 - ☑ 1. Tile-system foundation & 16-bit tiles (Uint16 fg/bg, tile metadata, protocolVersion) — deployed; verified via `scripts/phase1-check.ts`
 - ☑ 2. Background wall system overhaul (distinct walls + wall autotiling + natural wall gen) — deployed; 12 wall tiles, natural gen (caves keep walls, sky none), recessed edge shading, `isEnclosed` helper; verified via `scripts/phase2-check.ts`
-- ☐ 3. Surface landform realism & deterministic rivers
+- ☑ 3. Surface landform realism & deterministic rivers — deployed; plateau/mesa quantization (flat tops + cliffs), pure-fn-of-x rivers (riverCarve + unified waterTopAt fill), shore beaches; relief 291t, 101 streams, 7.9% wet (no flood); verified via `scripts/phase3-check.ts`
 - ☐ 4. Ore & vein rework (tiered, depth-gated, hardmode ids reserved)
 - ☐ 5. Cave-system deep rework (spaghetti + cheese + caverns)
 - ☐ 6. Underground biomes (jungle/ice/desert/marble/granite/glowing-mushroom)
