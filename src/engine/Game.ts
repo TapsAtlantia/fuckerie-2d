@@ -384,6 +384,23 @@ export class Game {
     if (inp.wasPressed("f")) this.player.fly = !this.player.fly;
     if (inp.wasPressed("t")) this.player.warp(0, 2000);
     if (inp.wasPressed("y")) this.player.warp(0, -2000);
+
+    // Debug teleport (for testing; likely removed later). [ / ] hop the surface left/right; k warps
+    // to the Dungeon entrance. Each lands on the surface and snaps the camera.
+    if (inp.wasPressed("[") || inp.wasPressed("]")) {
+      const dir = inp.wasPressed("]") ? 1 : -1;
+      const curTx = this.player.centerX / TILE_SIZE, curTy = this.player.centerY / TILE_SIZE;
+      const newTx = Math.round(curTx + dir * 300);
+      const surfY = this.world.gen.surfaceHeight(newTx) - 4;
+      this.player.warp(dir * 300, surfY - curTy);
+      this.camera.snapTo(this.player.centerX, this.player.centerY);
+    }
+    if (inp.wasPressed("k")) {
+      const d = this.world.gen.dungeonCenter();
+      const curTx = this.player.centerX / TILE_SIZE, curTy = this.player.centerY / TILE_SIZE;
+      this.player.warp(d.x - curTx, d.y - 8 - curTy);
+      this.camera.snapTo(this.player.centerX, this.player.centerY);
+    }
     // Reseed only makes sense in singleplayer — it would desync a shared world.
     if (inp.wasPressed("g") && this.mode === "single") this.reseed();
     if (inp.wasPressed("escape")) {

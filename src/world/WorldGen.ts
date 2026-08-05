@@ -50,6 +50,11 @@ export class WorldGen {
     this.dungeon = new DungeonSystem(seed, (x) => this.surfaceHeight(x));
   }
 
+  /** Debug/UI: the Dungeon's surface location (centre column X, top Y — both in tiles). */
+  dungeonCenter(): { x: number; y: number } {
+    return { x: this.dungeon.centerX(), y: this.dungeon.top };
+  }
+
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
   surfaceHeight(worldX: number): number {
     // Higher elevation → smaller (more negative) world-Y, since +Y is down. The elevation field
