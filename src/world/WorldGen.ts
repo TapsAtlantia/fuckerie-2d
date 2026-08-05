@@ -121,13 +121,10 @@ export class WorldGen {
     return level;
   }
 
-  /** Get the appropriate stone variant for a given depth and position. */
-  private stoneForDepth(worldX: number, worldY: number): TileId {
+  /** The bulk underground material for a position — the underground biome's stone/mud/ice/etc. */
+  private stoneForDepth(worldX: number, worldY: number, surfaceBiome?: Biome): TileId {
     if (worldY >= BAND.UNDERWORLD) return TileId.Hellstone;
-    
-    // Check underground biome for stone variant
-    const undergroundBiome = this.biomeSystem.undergroundBiomeAt(worldX, worldY);
-    return undergroundBiome.stoneVariant;
+    return this.biomeSystem.undergroundBiomeAt(worldX, worldY, surfaceBiome).stoneVariant;
   }
 
   /** Fill a chunk's foreground + background tiles. */
@@ -231,7 +228,7 @@ export class WorldGen {
         // Natural background WALL behind the terrain (stays when caves carve the foreground, so
         // caves read as carved-out rooms with a wall behind them like Terraria).
         const belowSurface = worldY - surfaceY;
-        const wallMaterial = belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY);
+        const wallMaterial = belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY, biome);
         chunk.bg[ly * CHUNK_SIZE + lx] = naturalWall(wallMaterial);
 
         // Foreground material by depth and biome
@@ -241,7 +238,7 @@ export class WorldGen {
         } else if (belowSurface < dirtDepth) {
           fg = biome.subSurfaceBlock;
         } else {
-          fg = this.stoneForDepth(worldX, worldY);
+          fg = this.stoneForDepth(worldX, worldY, biome);
         }
 
         // Beach: the top band of shore/bed columns is sand.
@@ -279,6 +276,37 @@ export class WorldGen {
         }
 
         chunk.fg[ly * CHUNK_SIZE + lx] = fg;
+      }
+    }
+
+    // Underground-biome vegetation: where a mud-based underground biome (jungle / glowing mushroom)
+    // meets cave air, grow its grass on the exposed face and hang/stand its plant in the air. Ice,
+    // desert, marble and granite biomes are just their bulk material (placed above) — no grass.
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const worldX = baseX + lx;
+      const biome = biomeCache[lx];
+      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+        const idx = ly * CHUNK_SIZE + lx;
+        if (chunk.fg[idx] !== TileId.Mud) continue; // only mud-based UG biomes grow grass here
+        const up = ly > 0 ? chunk.fg[idx - CHUNK_SIZE] : -1;
+        const down = ly < CHUNK_SIZE - 1 ? chunk.fg[idx + CHUNK_SIZE] : -1;
+        const left = lx > 0 ? chunk.fg[idx - 1] : -1;
+        const right = lx < CHUNK_SIZE - 1 ? chunk.fg[idx + 1] : -1;
+        if (up !== TileId.Air && down !== TileId.Air && left !== TileId.Air && right !== TileId.Air) continue;
+        const ub = this.biomeSystem.undergroundBiomeAt(worldX, baseY + ly, biome);
+        if (!ub.grass) continue;
+        chunk.fg[idx] = ub.grass;
+        if (ub.plant === TileId.Vines && down === TileId.Air) {
+          const h = hash2(worldX, baseY + ly, this.seed + 321);
+          if (h < 0.5) {
+            chunk.fg[idx + CHUNK_SIZE] = TileId.Vines;
+            if (ly + 2 < CHUNK_SIZE && chunk.fg[idx + 2 * CHUNK_SIZE] === TileId.Air && h < 0.2) {
+              chunk.fg[idx + 2 * CHUNK_SIZE] = TileId.Vines;
+            }
+          }
+        } else if (ub.plant === TileId.GlowMushroom && up === TileId.Air) {
+          if (hash2(worldX, baseY + ly, this.seed + 654) < 0.4) chunk.fg[idx - CHUNK_SIZE] = TileId.GlowMushroom;
+        }
       }
     }
 

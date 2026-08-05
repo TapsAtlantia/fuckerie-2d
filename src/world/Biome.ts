@@ -189,19 +189,30 @@ const SURFACE_BIOMES: readonly Biome[] = [
 ];
 
 // Underground biomes by depth and region
-interface UndergroundBiome {
+export interface UndergroundBiome {
   name: string;
-  stoneVariant: TileId;
+  stoneVariant: TileId; // bulk solid material that replaces generic stone in this region
   caveStyle: CaveStyle;
-  minDepth: number;
+  grass?: TileId; // grass grown on the material where it meets cave air (jungle/mushroom)
+  plant?: TileId; // plant placed in the cave air next to that grass
+  glow?: boolean; // biome emits ambient light (glowing mushroom)
 }
 
-const UNDERGROUND_BIOMES: readonly UndergroundBiome[] = [
-  { name: "normal caves", stoneVariant: TileId.Stone, caveStyle: "normal", minDepth: 0 },
-  { name: "lush caves", stoneVariant: TileId.MossyStone, caveStyle: "lush", minDepth: 100 },
-  { name: "crystal caverns", stoneVariant: TileId.DeepStone, caveStyle: "crystal", minDepth: BAND.CAVERN - 100 },
-  { name: "underworld", stoneVariant: TileId.Hellstone, caveStyle: "underworld", minDepth: BAND.UNDERWORLD },
-];
+// Underground biome catalogue. Selection (undergroundBiomeAt) blends surface-biome inheritance
+// (jungle above → underground jungle below), 2D region pockets (marble/granite), a rare glowing-
+// mushroom region, and depth (crystal caverns deep, underworld deepest).
+const UG: Record<string, UndergroundBiome> = {
+  normal: { name: "caves", stoneVariant: TileId.Stone, caveStyle: "normal" },
+  lush: { name: "lush caves", stoneVariant: TileId.MossyStone, caveStyle: "lush" },
+  jungle: { name: "underground jungle", stoneVariant: TileId.Mud, caveStyle: "lush", grass: TileId.JungleGrass, plant: TileId.Vines },
+  ice: { name: "ice caves", stoneVariant: TileId.Ice, caveStyle: "frozen" },
+  desert: { name: "underground desert", stoneVariant: TileId.Sandstone, caveStyle: "normal" },
+  marble: { name: "marble caves", stoneVariant: TileId.Marble, caveStyle: "normal" },
+  granite: { name: "granite caves", stoneVariant: TileId.Granite, caveStyle: "crystal" },
+  mushroom: { name: "glowing mushroom", stoneVariant: TileId.Mud, caveStyle: "lush", grass: TileId.MushroomGrass, plant: TileId.GlowMushroom, glow: true },
+  crystal: { name: "crystal caverns", stoneVariant: TileId.DeepStone, caveStyle: "crystal" },
+  underworld: { name: "underworld", stoneVariant: TileId.Hellstone, caveStyle: "underworld" },
+};
 
 // Hybrid biome configurations
 interface HybridBiomeConfig {
@@ -401,24 +412,37 @@ export class BiomeSystem {
   }
 
   /** Get underground biome at world X, Y based on depth and region. */
-  undergroundBiomeAt(worldX: number, worldY: number): UndergroundBiome {
+  undergroundBiomeAt(worldX: number, worldY: number, surfaceBiome?: Biome): UndergroundBiome {
     const depth = Math.max(0, worldY);
-    
-    // Region noise for underground variation
-    const region = this.noise.fbm2D(worldX * 0.0003, worldY * 0.0001, 2);
-    
-    // Select by depth, with region-based variation
-    for (let i = UNDERGROUND_BIOMES.length - 1; i >= 0; i--) {
-      const ub = UNDERGROUND_BIOMES[i];
-      if (depth >= ub.minDepth) {
-        // Add some variation: crystal caverns can appear earlier in high-region areas
-        if (ub.name === "crystal caverns" && region > 0.3 && depth >= BAND.CAVERN - 200) {
-          return ub;
-        }
-        return ub;
-      }
+    if (depth >= BAND.UNDERWORLD) return UG.underworld;
+    if (depth < 48) return UG.normal; // topsoil / near-surface stays plain
+
+    const surface = surfaceBiome ?? this.surfaceBiomeAt(worldX);
+    const s = surface.name;
+
+    // Rare glowing-mushroom region (2D low-freq blob) — can appear under any surface, deep-ish.
+    if (depth >= 120 && this.noise.fbm2D(worldX * 0.0016 + 400, worldY * 0.0016 + 400, 2) > 0.6) {
+      return UG.mushroom;
     }
-    return UNDERGROUND_BIOMES[0];
+
+    // Surface-inherited biomes extend downward (underground jungle/ice/desert run deep, like Terraria).
+    if (s === "jungle") return UG.jungle;
+    if (s === "snowy" || s === "tundra") return UG.ice;
+    if (s === "desert") return UG.desert;
+
+    // Marble & granite pockets — 2D region field, independent of the surface above.
+    const pocket = this.noise.fbm2D(worldX * 0.004 + 11, worldY * 0.004 - 7, 2);
+    if (depth >= 90) {
+      if (pocket > 0.5) return UG.marble;
+      if (pocket < -0.5 || s === "mountain" || s === "volcanic") return UG.granite;
+    }
+
+    // Deep transition to crystal caverns for ordinary columns.
+    if (depth >= BAND.CAVERN + 150) return UG.crystal;
+
+    // Forest/swamp read as lush; everything else plain stone.
+    if (depth >= 100 && (s === "forest" || s === "swamp")) return UG.lush;
+    return UG.normal;
   }
 
   /** Sky island mask: returns true if (x,y) is part of a floating island. */

@@ -112,6 +112,11 @@ export const enum TileId {
   OrichalcumOre = 78,
   AdamantiteOre = 79,
   TitaniumOre = 80,
+
+  // --- Phase 6: underground biome tiles (append-only) ---
+  Marble = 81, // marble caves (bright banded stone)
+  MushroomGrass = 82, // glowing-mushroom biome grass on mud (emits light)
+  GlowMushroom = 83, // glowing mushroom plant (emits light)
 }
 
 export type TileCategory =
@@ -273,6 +278,11 @@ export const TILE_PROPS: readonly TileProps[] = [
   { name: "orichalcum ore", solid: true, hardness: 2.6, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.OrichalcumOre, texture: "fleck" },
   { name: "adamantite ore", solid: true, hardness: 2.8, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.AdamantiteOre, texture: "fleck" },
   { name: "titanium ore", solid: true, hardness: 3.0, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.TitaniumOre, texture: "fleck" },
+
+  // Phase 6 underground-biome tiles.
+  { name: "marble", solid: true, hardness: 1.5, color: [212, 216, 226], lightEmit: 0, category: "stone", drop: TileId.Marble, texture: "twoTone" },
+  { name: "mushroom grass", solid: true, hardness: 0.5, color: [96, 150, 158], lightEmit: 95, category: "natural", drop: TileId.Mud, texture: "dither", tint: true },
+  { name: "glowing mushroom", solid: false, hardness: 0.1, color: [130, 214, 220], lightEmit: 150, category: "plant", drop: TileId.GlowMushroom, texture: "flat" },
 ];
 
 export function tile(id: number): TileProps {
