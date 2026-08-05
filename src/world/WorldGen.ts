@@ -1,4 +1,4 @@
-import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER, EVIL } from "../config";
+import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER, EVIL, CAVE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, naturalWall, tile } from "./Tile";
@@ -180,7 +180,18 @@ export class WorldGen {
       else topBlockCache[lx] = biome.topBlock;
 
       caveFloorCache[lx] = this.caveSystem.caveFloor(worldX, slope);
-      mouthOpenCache[lx] = this.caveSystem.mouthOpening(worldX, slope);
+      // Cave mouth: the visible notch, extended down as a throat to meet an actual cave. A mouth is
+      // only opened where it REACHES a cave within range — otherwise it would dead-end as a hole in
+      // the ground, so we don't carve it at all.
+      const notch = this.caveSystem.mouthOpening(worldX, slope);
+      let mouthCarve = 0;
+      if (notch > 0) {
+        const surfaceY = surfaceHeightCache[lx];
+        for (let d = notch; d <= CAVE.MOUTH_REACH; d++) {
+          if (this.caveSystem.caveAt(worldX, surfaceY + d, biome.caveStyle)) { mouthCarve = d + 2; break; }
+        }
+      }
+      mouthOpenCache[lx] = mouthCarve;
       chasmOpenCache[lx] = this.biomeSystem.evilChasmDepth(worldX);
       waterTopCache[lx] = waterTopExt[lx + BEACH.RADIUS];
 

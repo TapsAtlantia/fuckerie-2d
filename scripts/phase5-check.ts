@@ -1,4 +1,6 @@
 import { WorldGen } from "../src/world/WorldGen";
+import { CaveSystem } from "../src/world/Caves";
+import { BiomeSystem } from "../src/world/Biome";
 import { TileId, isWall } from "../src/world/Tile";
 import { CHUNK_SIZE, CAVE } from "../src/config";
 let fails=0; const check=(n:string,c:boolean,e="")=>{console.log(`${c?"PASS":"FAIL"}  ${n}${e?"  ("+e+")":""}`);if(!c)fails++;};
@@ -33,10 +35,17 @@ check("cave density grows with depth (tunnels->caverns)", shallow<mid && mid<dee
 {let a=0,walled=0; for(let x=0;x<200;x++)for(let d=200;d<600;d+=5){const sh=g.surfaceHeight(x); const y=sh+d; if(air(x,y)){a++; if(isWall(at(x,y,"bg")))walled++;}}
  check("background walls remain behind caves", a>50 && walled/a>0.9, `${walled}/${a} cave-air tiles walled`);}
 
-// surface mostly intact + rare organic mouths on steep terrain
-{let breach=0,mouths=0,cols=0; const N=8000;
- for(let i=0;i<N;i++){const x=X0+i;cols++;const sh=g.surfaceHeight(x); let b=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++)if(air(x,sh+d)){b=true;break;}
-   if(b){breach++; const slope=Math.abs(g.surfaceHeight(x+2)-g.surfaceHeight(x-2)); if(slope>=CAVE.MOUTH_MIN_SLOPE)mouths++;}}
- check("surface openings are steep mouths, not flat holes", breach/cols<0.03 && mouths/Math.max(1,breach)>0.9, `${(breach/cols*100).toFixed(2)}% breached, ${mouths}/${breach} on steep terrain`);
- check("organic cave mouths exist & are findable", mouths>20, `${mouths} steep-slope mouths in ${N} cols`);}
+// surface openings must be legitimate: a steep cave mouth OR an evil chasm — not random flat-ground
+// holes (only rare structure doorways remain). And every carved mouth must connect into the caves.
+{const cs=new CaveSystem(5150), bs=new BiomeSystem(5150); let breach=0,illegit=0,carved=0,connected=0,cols=0; const N=8000;
+ for(let i=0;i<N;i++){const x=X0+i;cols++;const sh=g.surfaceHeight(x); const slope=Math.abs(g.surfaceHeight(x+2)-g.surfaceHeight(x-2));
+   let b=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++)if(air(x,sh+d)){b=true;break;}
+   const steep=slope>=CAVE.MOUTH_MIN_SLOPE, evil=bs.isEvil(x);
+   if(b && !steep && !evil) illegit++;
+   if(b) breach++;
+   if(steep && air(x,sh)){ carved++; const style=bs.surfaceBiomeAt(x).caveStyle; let conn=false;
+     for(let d=0;d<=CAVE.MOUTH_REACH+2;d++){ if(!air(x,sh+d))break; if(cs.caveAt(x,sh+d,style)){conn=true;break;} }
+     if(conn)connected++; }}
+ check("surface openings are mouths/chasms, not flat-ground holes", breach/cols<0.05 && illegit/cols<0.006, `${(breach/cols*100).toFixed(2)}% breached, ${illegit} illegit (structure doors)`);
+ check("carved cave mouths connect to the network", carved>20 && connected/carved>0.9, `${connected}/${carved} carved mouths connect`);}
 console.log(`\n${fails===0?"ALL PASSED":fails+" FAILED"}`);if(fails>0)process.exit(1);

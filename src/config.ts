@@ -90,6 +90,7 @@ export const CAVE = {
   MOUTH_THRESHOLD: 0.38, // presence field must exceed this → occasional but findable
   MOUTH_MIN_OPEN: 7, // every mouth carves at least this deep → always clearly visible
   MOUTH_DEPTH: 18, // tiles carved open at a mouth's centre
+  MOUTH_REACH: 60, // extend a mouth's throat down this far to meet & connect to the cave network
   MOUTH_CRUST: 1, // crust drops to this at a mouth so the caves below break through into it
 } as const;
 
