@@ -37,6 +37,6 @@ check("cave density grows with depth (tunnels->caverns)", shallow<mid && mid<dee
 {let breach=0,mouths=0,cols=0; const N=8000;
  for(let i=0;i<N;i++){const x=X0+i;cols++;const sh=g.surfaceHeight(x); let b=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++)if(air(x,sh+d)){b=true;break;}
    if(b){breach++; const slope=Math.abs(g.surfaceHeight(x+2)-g.surfaceHeight(x-2)); if(slope>=CAVE.MOUTH_MIN_SLOPE)mouths++;}}
- check("surface stays mostly intact (breaches rare)", breach/cols<0.02, `${(breach/cols*100).toFixed(2)}% breached`);
- check("organic cave mouths exist on steep terrain", mouths>0, `${mouths} steep-slope mouths of ${breach} breaches`);}
+ check("surface openings are steep mouths, not flat holes", breach/cols<0.03 && mouths/Math.max(1,breach)>0.9, `${(breach/cols*100).toFixed(2)}% breached, ${mouths}/${breach} on steep terrain`);
+ check("organic cave mouths exist & are findable", mouths>20, `${mouths} steep-slope mouths in ${N} cols`);}
 console.log(`\n${fails===0?"ALL PASSED":fails+" FAILED"}`);if(fails>0)process.exit(1);

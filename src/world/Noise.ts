@@ -220,10 +220,10 @@ export class LayeredNoiseSystem {
    * Generate climate data (temperature, humidity, precipitation).
    */
   climate(x: number, y: number): Climate {
-    // Higher-frequency climate so biomes actually change as you walk (a biome every ~1-2k tiles),
-    // instead of one biome stretching across ~12k tiles.
-    const temperature = this.continental.fbm2D(x * 0.0006, y * 0.0006, 4); // -1 (cold) to 1 (hot)
-    const humidity = this.regional.fbm2D(x * 0.0005 + 100, y * 0.0005 + 100, 4); // -1 (dry) to 1 (wet)
+    // Climate frequency sets biome size: low enough that biomes are big, coherent regions (a biome
+    // every ~4-6k tiles) but not so low the world feels uniform. Few octaves = smooth boundaries.
+    const temperature = this.continental.fbm2D(x * 0.00015, y * 0.00015, 2); // -1 (cold) to 1 (hot)
+    const humidity = this.regional.fbm2D(x * 0.00013 + 100, y * 0.00013 + 100, 2); // -1 (dry) to 1 (wet)
     const precipitation = Math.max(0, this.local.fbm2D(x * 0.0008, y * 0.0008, 3)); // 0 to 1
     
     return { temperature, humidity, precipitation };

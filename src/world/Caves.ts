@@ -75,7 +75,8 @@ export class CaveSystem {
     const f = this.noise.fbm2D(worldX * CAVE.MOUTH_SCALE + 300, 21.7, 2);
     if (f <= CAVE.MOUTH_THRESHOLD) return 0;
     const t = (f - CAVE.MOUTH_THRESHOLD) / (1 - CAVE.MOUTH_THRESHOLD); // 0 at edge → 1 at centre
-    return Math.round(t * CAVE.MOUTH_DEPTH);
+    // A guaranteed minimum opening so every mouth is clearly visible, deepening toward the centre.
+    return CAVE.MOUTH_MIN_OPEN + Math.round(t * (CAVE.MOUTH_DEPTH - CAVE.MOUTH_MIN_OPEN));
   }
 
   private styleMul(style: CaveStyle): number {

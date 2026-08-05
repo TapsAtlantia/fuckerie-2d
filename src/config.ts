@@ -85,10 +85,11 @@ export const CAVE = {
   // Organic aboveground cave mouths: on steep mountainsides only, an opening is actively carved into
   // the hillside (rounded notch that deepens toward the site centre) and connects to the caves below.
   // Flat ground never gets one, so this is a mountainside entrance, not a random pit.
-  MOUTH_MIN_SLOPE: 5, // surface must be at least this steep (tiles rise over the ±2 slope sample)
+  MOUTH_MIN_SLOPE: 4, // surface must be at least this steep (tiles rise over the ±2 slope sample)
   MOUTH_SCALE: 0.02, // frequency of the mouth-presence field (~50-tile sites)
-  MOUTH_THRESHOLD: 0.42, // presence field must exceed this → occasional but findable
-  MOUTH_DEPTH: 13, // max tiles carved open at a mouth's centre
+  MOUTH_THRESHOLD: 0.38, // presence field must exceed this → occasional but findable
+  MOUTH_MIN_OPEN: 7, // every mouth carves at least this deep → always clearly visible
+  MOUTH_DEPTH: 18, // tiles carved open at a mouth's centre
   MOUTH_CRUST: 1, // crust drops to this at a mouth so the caves below break through into it
 } as const;
 
