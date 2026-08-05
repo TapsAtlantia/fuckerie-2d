@@ -134,6 +134,18 @@ export const ORE = {
   ALT_METAL_REGION: 6000, // tiles: size of a region that uses tin/lead/tungsten/platinum vs the originals
 } as const;
 
+// Phase 7: Evil biome (Corruption OR Crimson, seed-chosen) -------------------
+export const EVIL = {
+  SCALE: 0.00035, // frequency of the evil-region field (occasional bands)
+  THRESHOLD: 0.42, // field must exceed this → evil biome band
+  CHASM_SCALE: 0.07, // frequency of the vertical chasm field within an evil band
+  CHASM_WIDTH: 0.07, // |field| below this is inside a chasm (narrow crevices)
+  CHASM_DEPTH: 55, // how deep chasms carve from the surface
+  ORB_LATTICE: 22, // spacing of shadow-orb/crimson-heart nodes underground
+  ORB_CHANCE: 0.14, // per-lattice chance of an orb/heart in evil stone
+  ALTAR_CHANCE: 0.3, // per-lattice chance of an altar in evil stone
+} as const;
+
 // Phase 2: Structure parameters ---------------------------------------------
 export const STRUCTURE = {
   CELL_SIZE: 64, // tiles per structure cell (larger = more spread out)

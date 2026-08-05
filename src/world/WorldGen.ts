@@ -1,4 +1,4 @@
-import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER } from "../config";
+import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER, EVIL } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, naturalWall, tile } from "./Tile";
@@ -140,6 +140,7 @@ export class WorldGen {
     const topBlockCache: TileId[] = new Array(CHUNK_SIZE);
     const caveFloorCache: number[] = new Array(CHUNK_SIZE);
     const mouthOpenCache: number[] = new Array(CHUNK_SIZE); // tiles carved open for a cave mouth
+    const chasmOpenCache: number[] = new Array(CHUNK_SIZE); // tiles carved open for an evil chasm
     const waterTopCache: number[] = new Array(CHUNK_SIZE); // water-surface Y per column (Infinity = dry)
     const beachCache: boolean[] = new Array(CHUNK_SIZE); // shore/bed column → sandy top
     const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
@@ -180,6 +181,7 @@ export class WorldGen {
 
       caveFloorCache[lx] = this.caveSystem.caveFloor(worldX, slope);
       mouthOpenCache[lx] = this.caveSystem.mouthOpening(worldX, slope);
+      chasmOpenCache[lx] = this.biomeSystem.evilChasmDepth(worldX);
       waterTopCache[lx] = waterTopExt[lx + BEACH.RADIUS];
 
       // Check for micro-biomes (coarse check per column)
@@ -257,6 +259,11 @@ export class WorldGen {
           fg = TileId.Air;
         }
 
+        // Evil chasm: the corruption/crimson's signature vertical crevice descending from the surface.
+        if (belowSurface < chasmOpenCache[lx]) {
+          fg = TileId.Air;
+        }
+
         // Place ores in stone only (not dirt/sand/grass/cloud).
         if (tile(fg).category === "stone") {
           const ore = this.oreSystem.oreAt(worldX, worldY, biome);
@@ -272,6 +279,28 @@ export class WorldGen {
           if (microBiome.uniqueBlocks.length > 0) {
             const blockIndex = Math.floor(hash2(worldX, worldY, this.seed + 8888) * microBiome.uniqueBlocks.length);
             fg = microBiome.uniqueBlocks[blockIndex % microBiome.uniqueBlocks.length];
+          }
+        }
+
+        // Evil-biome underground features (embedded in solid evil stone): rare altars, plus glowing
+        // shadow-orb / crimson-heart loot nodes. Each on its own lattice → deterministic single tiles.
+        const evilCorrupt = biome.name === "corruption";
+        if ((evilCorrupt || biome.name === "crimson") && fg !== TileId.Air && belowSurface >= 40) {
+          // Altars (coarse lattice, mid-depth).
+          const AL = 50;
+          const acx = Math.floor(worldX / AL), acy = Math.floor(worldY / AL);
+          if (belowSurface <= 200 && hash2(acx, acy, this.seed + 4800) < EVIL.ALTAR_CHANCE) {
+            const axc = acx * AL + Math.floor(hash2(acx, acy, this.seed + 73) * AL);
+            const ayc = acy * AL + Math.floor(hash2(acx, acy, this.seed + 74) * AL);
+            if (worldX === axc && worldY === ayc) fg = evilCorrupt ? TileId.DemonAltar : TileId.CrimsonAltar;
+          }
+          // Shadow orbs / crimson hearts (finer lattice).
+          const L = EVIL.ORB_LATTICE;
+          const cxg = Math.floor(worldX / L), cyg = Math.floor(worldY / L);
+          if (fg !== TileId.DemonAltar && fg !== TileId.CrimsonAltar && hash2(cxg, cyg, this.seed + 4700) < EVIL.ORB_CHANCE) {
+            const ox = cxg * L + Math.floor(hash2(cxg, cyg, this.seed + 71) * L);
+            const oy = cyg * L + Math.floor(hash2(cxg, cyg, this.seed + 72) * L);
+            if (worldX === ox && worldY === oy) fg = evilCorrupt ? TileId.ShadowOrb : TileId.CrimsonHeart;
           }
         }
 

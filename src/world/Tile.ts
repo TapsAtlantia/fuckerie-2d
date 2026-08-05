@@ -117,6 +117,20 @@ export const enum TileId {
   Marble = 81, // marble caves (bright banded stone)
   MushroomGrass = 82, // glowing-mushroom biome grass on mud (emits light)
   GlowMushroom = 83, // glowing mushroom plant (emits light)
+
+  // --- Phase 7: evil biomes. Only the seed-chosen evil (corruption OR crimson) generates. ---
+  CorruptGrass = 84,
+  Ebonstone = 85,
+  CrimsonGrass = 86,
+  Crimstone = 87,
+  DemonAltar = 88, // corruption altar
+  CrimsonAltar = 89, // crimson altar
+  ShadowOrb = 90, // corruption breakable loot node (glows)
+  CrimsonHeart = 91, // crimson breakable loot node (glows)
+  // Reserved Hallow (post-hardmode) ids — exist so the id space is stable; not generated yet.
+  PearlStone = 92,
+  HallowedGrass = 93,
+  PearlSand = 94,
 }
 
 export type TileCategory =
@@ -283,6 +297,20 @@ export const TILE_PROPS: readonly TileProps[] = [
   { name: "marble", solid: true, hardness: 1.5, color: [212, 216, 226], lightEmit: 0, category: "stone", drop: TileId.Marble, texture: "twoTone" },
   { name: "mushroom grass", solid: true, hardness: 0.5, color: [96, 150, 158], lightEmit: 95, category: "natural", drop: TileId.Mud, texture: "dither", tint: true },
   { name: "glowing mushroom", solid: false, hardness: 0.1, color: [130, 214, 220], lightEmit: 150, category: "plant", drop: TileId.GlowMushroom, texture: "flat" },
+
+  // Phase 7 evil-biome tiles.
+  { name: "corrupt grass", solid: true, hardness: 0.5, color: [124, 96, 176], lightEmit: 0, category: "natural", drop: TileId.Ebonstone, texture: "dither", tint: true },
+  { name: "ebonstone", solid: true, hardness: 1.6, color: [66, 58, 92], lightEmit: 0, category: "stone", drop: TileId.Ebonstone, texture: "dither", tint: true },
+  { name: "crimson grass", solid: true, hardness: 0.5, color: [184, 72, 74], lightEmit: 0, category: "natural", drop: TileId.Crimstone, texture: "dither", tint: true },
+  { name: "crimstone", solid: true, hardness: 1.6, color: [104, 48, 54], lightEmit: 0, category: "stone", drop: TileId.Crimstone, texture: "dither", tint: true },
+  { name: "demon altar", solid: true, hardness: 3.0, color: [92, 78, 116], lightEmit: 45, category: "deco", drop: null, texture: "fleck" },
+  { name: "crimson altar", solid: true, hardness: 3.0, color: [120, 60, 66], lightEmit: 45, category: "deco", drop: null, texture: "fleck" },
+  { name: "shadow orb", solid: true, hardness: 1.0, color: [126, 96, 192], lightEmit: 90, category: "gem", drop: null, texture: "flat" },
+  { name: "crimson heart", solid: true, hardness: 1.0, color: [210, 66, 84], lightEmit: 90, category: "gem", drop: null, texture: "flat" },
+  // Reserved Hallow (not generated yet).
+  { name: "pearlstone", solid: true, hardness: 1.6, color: [222, 214, 234], lightEmit: 0, category: "stone", drop: TileId.PearlStone, texture: "dither" },
+  { name: "hallowed grass", solid: true, hardness: 0.5, color: [120, 206, 224], lightEmit: 0, category: "natural", drop: TileId.PearlStone, texture: "dither", tint: true },
+  { name: "pearlsand", solid: true, hardness: 0.6, color: [232, 222, 238], lightEmit: 0, category: "sand", drop: TileId.PearlSand, texture: "dither" },
 ];
 
 export function tile(id: number): TileProps {

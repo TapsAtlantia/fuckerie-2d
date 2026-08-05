@@ -1,6 +1,6 @@
 import { Noise, LayeredNoiseSystem, hash2 } from "./Noise";
 import { TileId } from "./Tile";
-import { BAND, BIOME } from "../config";
+import { BAND, BIOME, EVIL } from "../config";
 
 export type TreeType = "oak" | "birch" | "pine" | "jungle" | null;
 export type CaveStyle = "normal" | "lush" | "frozen" | "crystal" | "underworld";
@@ -189,6 +189,40 @@ const SURFACE_BIOMES: readonly Biome[] = [
 ];
 
 // Underground biomes by depth and region
+// Evil biomes (Phase 7): one per world, seed-chosen. Purple corruption or red crimson.
+const CORRUPTION_BIOME: Biome = {
+  name: "corruption",
+  topBlock: TileId.CorruptGrass,
+  subSurfaceBlock: TileId.Ebonstone,
+  subSurfaceDepth: 5,
+  stoneVariant: TileId.Ebonstone,
+  surfaceAmplitude: 1.0,
+  treeType: null,
+  treeDensity: 0,
+  plants: [TileId.Vines],
+  plantDensity: 0.12,
+  oreWeighting: [],
+  caveStyle: "normal",
+  undergroundVariant: TileId.Ebonstone,
+  isHybrid: false,
+};
+const CRIMSON_BIOME: Biome = {
+  name: "crimson",
+  topBlock: TileId.CrimsonGrass,
+  subSurfaceBlock: TileId.Crimstone,
+  subSurfaceDepth: 5,
+  stoneVariant: TileId.Crimstone,
+  surfaceAmplitude: 1.0,
+  treeType: null,
+  treeDensity: 0,
+  plants: [TileId.Vines],
+  plantDensity: 0.12,
+  oreWeighting: [],
+  caveStyle: "normal",
+  undergroundVariant: TileId.Crimstone,
+  isHybrid: false,
+};
+
 export interface UndergroundBiome {
   name: string;
   stoneVariant: TileId; // bulk solid material that replaces generic stone in this region
@@ -212,6 +246,8 @@ const UG: Record<string, UndergroundBiome> = {
   mushroom: { name: "glowing mushroom", stoneVariant: TileId.Mud, caveStyle: "lush", grass: TileId.MushroomGrass, plant: TileId.GlowMushroom, glow: true },
   crystal: { name: "crystal caverns", stoneVariant: TileId.DeepStone, caveStyle: "crystal" },
   underworld: { name: "underworld", stoneVariant: TileId.Hellstone, caveStyle: "underworld" },
+  corruption: { name: "underground corruption", stoneVariant: TileId.Ebonstone, caveStyle: "normal" },
+  crimson: { name: "underground crimson", stoneVariant: TileId.Crimstone, caveStyle: "normal" },
 };
 
 // Hybrid biome configurations
@@ -250,8 +286,36 @@ export class BiomeSystem {
     this.layeredNoise = new LayeredNoiseSystem(seed);
   }
 
+  /** The world's evil biome kind, chosen deterministically by seed (Corruption OR Crimson). */
+  evilKind(): "corruption" | "crimson" {
+    return hash2(0, 0, this.seed + 91117) < 0.5 ? "corruption" : "crimson";
+  }
+
+  /** The evil biome definition for this world. */
+  evilBiome(): Biome {
+    return this.evilKind() === "corruption" ? CORRUPTION_BIOME : CRIMSON_BIOME;
+  }
+
+  /** Whether this column lies in an evil-biome band (occasional bands away from spawn). */
+  isEvil(worldX: number): boolean {
+    return this.noise.fbm2D(worldX * EVIL.SCALE + 5000, 0, 2) > EVIL.THRESHOLD;
+  }
+
+  /**
+   * Depth of a vertical evil chasm carved from the surface at this column (0 = none). Only inside an
+   * evil band, at narrow crevice columns — the corruption/crimson's signature descending chasms.
+   */
+  evilChasmDepth(worldX: number): number {
+    if (!this.isEvil(worldX)) return 0;
+    const f = this.noise.fbm2D(worldX * EVIL.CHASM_SCALE + 33, 7.3, 2);
+    if (Math.abs(f) >= EVIL.CHASM_WIDTH) return 0;
+    const t = 1 - Math.abs(f) / EVIL.CHASM_WIDTH; // 1 at centre → 0 at edge
+    return Math.round(10 + t * EVIL.CHASM_DEPTH);
+  }
+
   /** Get surface biome at world X using temperature/humidity Whittaker diagram with blending. */
   surfaceBiomeAt(worldX: number): Biome {
+    if (this.isEvil(worldX)) return this.evilBiome(); // evil biome overrides the climate biome
     // Use layered noise for more detailed climate
     const climate = this.layeredNoise.climate(worldX, 0);
     const temp = climate.temperature;
@@ -415,9 +479,13 @@ export class BiomeSystem {
   undergroundBiomeAt(worldX: number, worldY: number, surfaceBiome?: Biome): UndergroundBiome {
     const depth = Math.max(0, worldY);
     if (depth >= BAND.UNDERWORLD) return UG.underworld;
-    if (depth < 48) return UG.normal; // topsoil / near-surface stays plain
 
     const surface = surfaceBiome ?? this.surfaceBiomeAt(worldX);
+    // Evil biomes extend straight down as ebonstone/crimstone (overrides everything but underworld).
+    if (surface.name === "corruption") return UG.corruption;
+    if (surface.name === "crimson") return UG.crimson;
+
+    if (depth < 48) return UG.normal; // topsoil / near-surface stays plain
     const s = surface.name;
 
     // Rare glowing-mushroom region (2D low-freq blob) — can appear under any surface, deep-ish.

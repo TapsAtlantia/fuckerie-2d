@@ -21,7 +21,7 @@ ids append-only.
 - ☑ 4. Ore & vein rework (tiered, depth-gated, hardmode ids reserved) — deployed; copper/tin→iron/lead→silver/tungsten→gold/platinum depth tiers, region alt-metals, coal + 6 gems in deep pockets, coherent lobed vein blobs (~17t), 6 hardmode ore ids reserved; verified via `scripts/phase4-check.ts`
 - ☑ 5. Cave-system deep rework (spaghetti + cheese + caverns) — deployed; smooth 2-oct warped spaghetti tunnels + low-freq cheese caverns, quadratic depth-relax (surface solid ~10% → caverns ~43%), connected network (87% air in caves≥25t), rare steep-mountainside cave mouths re-added; verified via `scripts/phase5-check.ts`
 - ☑ 6. Underground biomes (jungle/ice/desert/marble/granite/glowing-mushroom) — deployed; `undergroundBiomeAt` inherits from surface biome (jungle→mud+grass+vines, snow→ice, desert→sandstone) + marble/granite region pockets + rare glowing-mushroom biome (emits light) + deep crystal/underworld; grass grows on exposed mud faces; verified via `scripts/phase6-check.ts`
-- ☐ 7. Evil biomes: Corruption & Crimson (+ reserve Hallow)
+- ☑ 7. Evil biomes: Corruption & Crimson (+ reserve Hallow) — deployed; seed picks one evil (corruption OR crimson), occasional surface bands with descending chasms, ebonstone/crimstone underground, lattice altars + shadow orbs/crimson hearts; the other evil's ids exist but never generate; Hallow ids reserved; verified via `scripts/phase7-check.ts`
 - ☐ 8. The Dungeon (large multi-chunk structure + locked loot + boss gate)
 - ☐ 9. The Underworld / Hell (lava seas, hellstone, ruined houses, hellforge)
 - ☐ 10. Sky / floating islands with loot
