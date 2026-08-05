@@ -473,231 +473,198 @@ Each phase uses this template:
 - **MP:** Deterministic underworld generation — no netcode changes.
 - **Done when:** Reaching depth 4000 shows lava seas and hellstone, ruined houses with hellforges appear, obsidian forms where water meets lava, underworld has distinct orange lighting.
 
-### Phase 10 — Sky / floating islands with loot (TERRARIA ALGORITHM)
-- **Goal:** Implement Terraria's sky island algorithm: floating islands in sky band, cloud stone blocks, living trees, gold chests with loot, and sky island house structures.
-- **Why:** Sky islands provide exploration rewards and unique building locations. Terraria's sky island algorithm is proven and balanced.
-- **Prereqs:** 0.5, 1, 2, 3.
-- **Touch/Create:** [world/SkyIslands.ts](src/world/SkyIslands.ts) (new file), [world/TerrainGen.ts](src/world/TerrainGen.ts) (extract Terraria sky islands), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate sky islands), [world/Tile.ts](src/world/Tile.ts) (sky island tile ids).
+### Phase 10 — Sky / floating islands with loot
+- **Goal:** Proper floating islands in the Sky band: grassy islands with island houses, skyware
+  chests (sky loot: cloud-in-a-bottle, starfury, lucky horseshoe), harpy territory, and cloud/skyware
+  blocks.
+- **Why:** Early exploration reward + iconic Terraria feature. `skyIslandMask` already exists in
+  [world/Biome.ts](src/world/Biome.ts).
+- **Prereqs:** 1, 13/14.
+- **Touch/Create:** [world/Biome.ts](src/world/Biome.ts) (`skyIslandMask` → real island shaping),
+  [world/WorldGen.ts](src/world/WorldGen.ts), sky tiles + island-house template + sky loot pool.
 - **Do:**
-  1. Extract Terraria's sky island algorithm from source (WorldGen.cs lines 11000-11500).
-  2. Implement Terraria's sky island placement: 1-3 islands per world, placed in sky band (depth < -400), at varying heights.
-  3. Implement Terraria's sky island noise mask: blob noise (frequency 0.003, threshold 0.3) creates island shapes.
-  4. Implement Terraria's sky island composition: cloud stone blocks on surface, sky stone in background, rain clouds above.
-  5. Implement Terraria's sky island structures: small wooden house with door, table, chair, light source.
-  6. Implement Terraria's sky island loot: gold chest with rare loot (starfury, cloud in a bottle, lucky horseshoe, etc.).
-  7. Implement Terraria's sky island trees: living trees on larger islands, regular trees on smaller islands.
-  8. Implement Terraria's sky island gravity: normal gravity on islands, falls into space if knocked off.
-  9. Implement Terraria's sky island biome: always "sky" biome with grass and flowers.
-  10. Add Terraria's sky island rain: constant rain/clouds above islands.
-- **Data:** Terraria-extracted sky island parameters (island count, height range, noise parameters), sky island tile ids (cloud stone, sky stone), sky island loot tables.
-- **MP:** Deterministic sky island placement — no netcode changes.
-- **Done when:** Sky band has 1-3 floating islands, islands have cloud stone surface and houses, gold chests contain rare loot, islands have rain and clouds above.
+  1. Turn the sky-island mask into a handful of well-shaped grassy islands per region (not noise
+     blobs): flat-ish top, cloud underside, some with a small house + chest.
+  2. Skyware chest loot pool; cloud/rain-cloud/skyware blocks.
+  3. Islands are deterministic and sparse.
+- **Data:** sky tiles + island house template + sky loot pool.
+- **MP:** deterministic.
+- **Done when:** flying up reveals proper floating islands, some with houses + skyware chests.
 
-### Phase 11 — Oceans, beaches & underwater caves (TERRARIA INTEGRATION)
-- **Goal:** Implement Terraria's ocean algorithm: ocean at world edges, sandy beaches, underwater cave systems, ocean loot, and water-specific structures.
-- **Why:** Oceans provide unique biomes and exploration. Terraria's ocean algorithm creates distinct coastal and underwater environments.
-- **Prereqs:** 0.5, 1, 2, 3, 9.
-- **Touch/Create:** [world/Oceans.ts](src/world/Oceans.ts) (new file), [world/TerrainGen.ts](src/world/TerrainGen.ts) (extract Terraria oceans), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate oceans), [world/Tile.ts](src/world/Tile.ts) (ocean tile ids).
-- **Do:**
-  1. Extract Terraria's ocean algorithm from source (WorldGen.cs lines 9000-10000).
-  2. Implement Terraria's ocean placement: oceans at world edges (left and right), fixed distance from spawn (approximately 2000 tiles).
-  3. Implement Terraria's ocean depth: ocean floor drops gradually to deep water (50+ tiles deep).
-  4. Implement Terraria's beach generation: sand beaches at ocean edges, extending 10-20 tiles inland.
-  5. Implement Terraria's underwater cave systems: cave networks below ocean floor, water-filled.
-  6. Implement Terraria's ocean structures: wooden pier platforms, underwater coral reefs, sea shell decorations.
-  7. Implement Terraria's ocean loot: ocean chests with water-specific loot (trident, diving gear, etc.).
-  8. Implement Terraria's ocean enemies: fish, crabs, sharks spawn in ocean water.
-  9. Implement Terraria's ocean biome: "ocean" biome with sandy beaches and coral reefs.
-  10. Add Terraria's ocean lighting: blue-green tinted lighting underwater, reduced visibility with depth.
-- **Data:** Terraria-extracted ocean parameters (ocean distance from spawn, depth profile, beach width), ocean tile ids (sand, coral, sea shells), ocean loot tables.
-- **MP:** Deterministic ocean placement — no netcode changes.
-- **Done when:** World edges have oceans with sandy beaches, ocean floor has underwater caves, coral reefs and piers appear, ocean chests contain water loot.
+### Phase 11 — Oceans, beaches & underwater caves
+- **Goal:** Ocean regions (deterministic ocean bands at intervals, since the world is infinite):
+  deep salt water, sand floor, beaches, coral, underwater chests, and ocean-edge dungeon/pyramid
+  anchoring.
+- **Why:** Oceans anchor the Dungeon/Jungle-temple sides and add fishing/exploration variety.
+- **Prereqs:** 1, 3, 13/14, 64 (liquids optional; static ocean water fine now).
+- **Touch/Create:** [world/WorldGen.ts](src/world/WorldGen.ts) (ocean band placement),
+  [world/Liquid.ts](src/world/Liquid.ts) (large static water bodies), ocean tiles (coral, seashell)
+  + ocean chest loot.
+- **Do:** place ocean depressions at deterministic x-intervals (or as the low ends of large
+  continents), fill with water to sea level, sand floors, coral deco, water chests, underwater caves.
+- **Data:** ocean tiles + loot.
+- **MP:** deterministic.
+- **Done when:** walking far reaches an ocean with beach → shallow → deep water and a water chest.
 
-### Phase 12 — River/lake/aquifer integration & water polish (TERRARIA STYLE)
-- **Goal:** Implement Terraria's water system: rivers that flow to oceans, lakes in depressions, aquifers underground, and waterfalls.
-- **Why:** Current water system is good but Terraria's water flow and interaction with terrain is more sophisticated.
-- **Prereqs:** 0.5, 1, 2, 3, 11.
-- **Touch/Create:** [world/Liquid.ts](src/world/Liquid.ts) (enhance water system), [world/TerrainGen.ts](src/world/TerrariaGen.ts) (extract Terraria water), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate Terraria water).
-- **Do:**
-  1. Extract Terraria's water algorithm from source (WorldGen.cs lines 3000-4000).
-  2. Implement Terraria's river-to-ocean flow: rivers always flow toward nearest ocean, water level drops at ocean mouth.
-  3. Implement Terraria's lake depression algorithm: lakes form in terrain depressions with outlet spill points.
-  4. Implement Terraria's aquifer system: underground water pockets that connect to surface water.
-  5. Implement Terraria's waterfall generation: where terrain has sharp drops, water creates waterfalls.
-  6. Implement Terraria's water spread: water flows and levels out over time (dynamic liquids).
-  7. Implement Terraria's water interaction with tiles: some blocks absorb water, some block water.
-  8. Implement Terraria's water pressure: deeper water has more pressure when released.
-  9. Implement Terraria's water evaporation: small pools evaporate over time.
-  10. Add Terraria's water color variation: different biomes have slightly different water colors.
-- **Data:** Terraria-extracted water parameters (river flow algorithm, lake depression rules, aquifer depth), water physics constants.
-- **MP:** Water physics need host-authoritative simulation (Book VI). For now, static water placement.
-- **Done when:** Rivers flow toward oceans, lakes form in depressions, waterfalls appear at terrain drops, water has slight color variation by biome.
+### Phase 12 — River/lake/aquifer integration & water polish
+- **Goal:** Tie rivers (Phase 3) and lakes/aquifers into the world coherently: surface ponds, cave
+  pools, aquifers behind stone, waterfalls at cliffs (visual), consistent water levels.
+- **Why:** Consolidates all static water so it's believable and consistent before liquids become
+  dynamic (Phase 64).
+- **Prereqs:** 3, 5, 11.
+- **Touch/Create:** [world/WorldGen.ts](src/world/WorldGen.ts), [world/Liquid.ts](src/world/Liquid.ts),
+  [engine/Renderer.ts](src/engine/Renderer.ts) (waterfall/edge visuals).
+- **Do:** unify the water-fill passes (ponds in depressions, cave pools, aquifers), cap depths, add
+  visual waterfall strands where water meets a cliff edge, gentle water surface shimmer.
+- **MP:** deterministic/static.
+- **Done when:** water bodies look intentional and consistent everywhere; no global flooding.
 
-### Phase 13 — Prefab structure library & authoring pipeline (MASSIVE EXPANSION)
-- **Goal:** Create 50+ structure templates across all contexts (surface, underground, sky, ocean, dungeon, underworld) with a simple authoring pipeline for adding more.
-- **Why:** Terraria has dozens of structure types. Current structure system is good but needs massive content expansion to match Terraria's content density.
-- **Prereqs:** 0.5, 1, 2, 3, 8, 9, 10, 11.
-- **Touch/Create:** [world/structures/StructureTemplates.ts](src/world/structures/StructureTemplates.ts) (massive expansion), [world/StructureAuthoring.ts](src/world/StructureAuthoring.ts) (new tool), [world/WorldGen.ts](src/world/WorldGen.ts) (use expanded templates).
+### Phase 13 — Prefab structure library & authoring pipeline (big expansion)
+- **Goal:** A rich library of hand-authored prefab structures with a robust authoring format:
+  surface (villages, cabins, ruins, wizard towers, wells), underground (mineshafts, cabins, hearts of
+  caverns), plus a legend that supports fg + bg + furniture + chests + spawners.
+- **Why:** Structures are exploration payoff. The prefab engine exists
+  ([world/Structures.ts](src/world/Structures.ts) +
+  [world/structures/StructureTemplates.ts](src/world/structures/StructureTemplates.ts)); this scales
+  it up dramatically and standardizes authoring.
+- **Prereqs:** 1, 2. Feeds 8, 9, 10, 11, 14.
+- **Touch/Create:** [world/structures/StructureTemplates.ts](src/world/structures/StructureTemplates.ts)
+  (many templates), [world/Structures.ts](src/world/Structures.ts) (legend upgrades: bg layer,
+  furniture, chest markers, spawn markers, variants, mirroring, anchor rules, biome/context gating),
+  a short authoring doc comment.
 - **Do:**
-  1. Create 50+ structure templates organized by context:
-     - **Surface (20):** small house, medium house, large house, tower, ruin, graveyard, camp, bridge, well, fountain, market stall, blacksmith, inn, stable, windmill, lighthouse, statue, gazebo, bandit camp.
-     - **Underground (15):** mushroom house, spider nest, bee hive, underground ruin, abandoned mine, crystal cave, lava pool, underground lake, treasure vault, armory, library, prison, laboratory, altar room, sacrificial chamber.
-     - **Sky (5):** sky house, cloud platform, floating castle, sky ruin, celestial observatory.
-     - **Ocean (5):** pier, beach house, coral tower, shipwreck, underwater grotto.
-     - **Dungeon (3):** treasure room, library, armory (enhanced versions).
-     - **Underworld (2):** ruined house, hellforge room.
-  2. Implement structure authoring tool: ASCII-based template editor with live preview, legend system for tile types.
-  3. Add structure metadata: loot tables, enemy spawn tables, furniture placement rules, biome restrictions.
-  4. Implement structure variants: each template has 2-3 variants with slight differences (different furniture, different loot).
-  5. Add structure connectivity: some structures connect to each other (bridge connects to both banks).
-  6. Implement structure placement rules: biome-specific structures (jungle temple only in jungle), depth-specific structures (underground ruins only deep).
-  7. Add structure scaling: some structures have size variants (small/medium/large tower).
-  8. Implement structure orientation: structures can be rotated or mirrored.
-  9. Add structure destruction rules: some structures are indestructible, some drop loot when destroyed.
-  10. Create structure documentation: images and descriptions of each structure for reference.
-- **Data:** 50+ structure templates with ASCII definitions, loot tables, enemy spawns, placement rules.
-- **MP:** Structure placement is deterministic — no netcode changes.
-- **Done when:** World has diverse structures everywhere, structure authoring tool works, structures have variants and rules, each biome has unique structures.
+  1. Upgrade the legend to encode: foreground char, background char, "place chest of loot-pool X",
+     "place NPC-spawn marker", "place enemy-spawner", "torch/light", "door".
+  2. Author 20–40 structures across contexts (surface homes/villages/ruins/towers/wells;
+     underground cabins/mineshafts/mini-dungeons; biome-specific: desert pyramids, jungle huts,
+     snow cabins).
+  3. Context gating + terrain anchoring + foundation cast-down (reuse existing) + hash-mirroring;
+     keep placement **sparse** (owner preference).
+- **Data:** the template library + loot-pool references.
+- **MP:** deterministic placement; chests' contents come from deterministic loot rolls (Phase 14).
+- **Done when:** exploring surface + caves turns up varied, detailed, hand-made structures, sparsely
+  placed, seamless with terrain.
 
-### Phase 14 — Chests, loot tables & pots (TERRARIA INTEGRATION)
-- **Goal:** Implement Terraria's chest and loot system: gold/silver/wooden chests, loot tables with rarity tiers, pot and vase containers with drops, and chest placement rules.
-- **Why:** Chests and loot are critical for exploration rewards. Terraria's loot system is balanced and proven.
-- **Prereqs:** 0.5, 1, 13.
-- **Touch/Create:** [world/Chests.ts](src/world/Chests.ts) (new file), [world/TerrainGen.ts](src/world/TerrainGen.ts) (extract Terraria loot), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate chests), [world/Tile.ts](src/world/Tile.ts) (chest and pot tile ids).
+### Phase 14 — Chests, loot tables & pots
+- **Goal:** Worldgen chests filled by deterministic, biome/depth-appropriate **loot tables**, plus
+  breakable pots that drop coins/hearts/potions/ammo.
+- **Why:** Loot is the reward loop; every structure/biome needs appropriate rewards. Requires the
+  item system to exist enough to reference item ids — coordinate with Book II (if items aren't ready,
+  define item-id constants now and fill behavior when Book II lands).
+- **Prereqs:** 13; coordinates with 21 (item model). If Book II not started, stub items as ids.
+- **Touch/Create:** new `world/Loot.ts` (loot-table registry + deterministic roll), chest as an
+  interactive tile with contents stored in chunk metadata, pots tile + drop logic, integration in
+  [world/Structures.ts](src/world/Structures.ts) + [world/WorldGen.ts](src/world/WorldGen.ts).
 - **Do:**
-  1. Extract Terraria's loot algorithm from source (WorldGen.cs lines 15000-16000).
-  2. Implement Terraria's chest types: gold chest (rare loot), silver chest (uncommon loot), wooden chest (common loot).
-  3. Implement Terraria's loot tables: rarity tiers (common/uncommon/rare/legendary), item pools by context (surface, underground, dungeon, sky).
-  4. Implement Terraria's chest placement: gold chests in structures/dungeons, silver chests in underground, wooden chests on surface.
-  5. Implement Terraria's pot and vase system: decorative containers that drop items when broken.
-  6. Implement Terraria's loot generation: each chest generates 3-6 items from appropriate loot table.
-  7. Implement Terraria's biome-specific loot: jungle chests have jungle loot, dungeon chests have dungeon loot.
-  8. Implement Terraria's key system: golden key for golden chests, shadow key for shadow chests.
-  9. Implement Terraria's chest locking: some chests are locked and require keys.
-  10. Add Terraria's chest visual variety: different chest sprites for different types.
-- **Data:** Terraria-extracted loot tables, chest placement rules, pot/vase drop tables, chest tile ids.
-- **MP:** Chest loot generation is deterministic — no netcode changes. Chest opening sends loot to clients.
-- **Done when:** Structures have appropriate chests, chests contain loot from Terraria's tables, pots/vases drop items when broken, golden chests appear in dungeons.
+  1. Loot-table registry keyed by pool (surface-chest, gold-chest-dungeon, skyware, ice, jungle,
+     hell-shadow, ocean, pot-common, …). Each entry: guaranteed items + weighted random + coin
+     range, rolled deterministically from `hash2(chestWorldX, chestWorldY, seed)`.
+  2. Chests store an item list (in a per-chunk chest-content map, saved with deltas). Opening a chest
+     shows a container UI (basic now; polished with storage UI in Phase 28).
+  3. Pots scatter in caves/structures; breaking drops from `pot-*` pools.
+- **Data:** ~15 loot pools with real item weights.
+- **MP:** chest contents are deterministic on gen (both peers roll the same), but *taking* items is a
+  host-authoritative edit (add a `chestTake`/`containerSync` message so two players can't dupe).
+- **Done when:** chests contain sensible, varied loot; opening/taking works and is co-op safe; pots
+  drop coins/hearts.
 
-### Phase 15 — Life crystals, mana crystals, altars, shrines, gems (TERRARIA ALGORITHM)
-- **Goal:** Implement Terraria's health/mana crystal system, demon/crimson altars, shrines, and gem placement rules.
-- **Why:** Health/mana crystals are core to progression. Altars enable hardmode. Shrines provide teleportation. Terraria's placement is balanced.
-- **Prereqs:** 0.5, 1, 2, 13, 14.
-- **Touch/Create:** [world/ProgressionItems.ts](src/world/ProgressionItems.ts) (new file), [world/TerrainGen.ts](src/world/TerrariaGen.ts) (extract Terraria placement), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate progression items), [world/Tile.ts](src/world/Tile.ts) (progression item tile ids).
-- **Do:**
-  1. Extract Terraria's progression item algorithm from source (WorldGen.cs lines 17000-18000).
-  2. Implement Terraria's life crystal placement: 10-15 life crystals per world, placed in underground, increase max HP when used.
-  3. Implement Terraria's mana crystal placement: 8-12 mana crystals per world, placed in underground, increase max mana when used.
-  4. Implement Terraria's demon/crimson altar placement: already in Phase 7, enhance with hardmode functionality.
-  5. Implement Terraria's shrine system: pylon shrines for fast travel, teleportation shrines to specific biomes.
-  6. Implement Terraria's gem placement: single gems on cave ceilings, larger gem clusters in deep caves.
-  7. Implement Terraria's heart statue: spawns hearts when activated, placed in structures.
-  8. Implement Terraria's star statue: spawns stars when activated, placed in structures.
-  9. Implement Terraria's usage rules: life crystals can only be used once per world, mana crystals same.
-  10. Add Terraria's visual effects: crystals glow, shrines have particle effects.
-- **Data:** Terraria-extracted placement rules (crystal counts, altar counts, shrine types), progression item tile ids.
-- **MP:** Progression item placement is deterministic — no netcode changes. Item usage sends state to clients.
-- **Done when:** Underground has life crystals and mana crystals, altars appear in evil biomes, shrines appear in structures, gems appear in caves.
+### Phase 15 — Life crystals, mana crystals, altars, shrines, gems
+- **Goal:** Scatter progression pickups in the world: Life Crystals (underground, +HP), Mana Crystals
+  (crafted from fallen stars but also placed), shrines with rewards, gem clusters, and the enchanted
+  sword shrine micro-structure.
+- **Why:** Permanent player upgrades come from the world (life crystals raise the HP cap used in
+  Book III). Fallen stars spawn at night (Phase 61) — reserve here.
+- **Prereqs:** 5, 6, 13, 14; feeds 31 (HP/mana tiers).
+- **Touch/Create:** [world/WorldGen.ts](src/world/WorldGen.ts) (place crystals in cavern pockets),
+  life/mana crystal tiles + pickup behavior (Book III consumes them), shrine templates.
+- **Do:** deterministically place life crystals in the underground/caverns at a controlled density;
+  gem clusters in gem caves; a few special shrines (enchanted sword, etc.). Breaking a life crystal
+  yields a Life Crystal item (consumed in Book III to raise max HP).
+- **MP:** breaking = host-authoritative edit; the HP gain applies per-player who consumes the item.
+- **Done when:** caverns contain findable life crystals + gem clusters + the odd shrine.
 
-### Phase 16 — Micro-biomes & set-pieces (TERRARIA INTEGRATION)
-- **Goal:** Implement Terraria's micro-biomes: living trees, giant trees, bee hives, spider nests, marble caves, granite caves, and other set-piece structures.
-- **Why:** Micro-biomes add exploration variety and unique destinations. Terraria's micro-biomes are iconic and well-designed.
-- **Prereqs:** 0.5, 1, 2, 3, 6, 13.
-- **Touch/Create:** [world/MicroBiomes.ts](src/world/MicroBiomes.ts) (expand massively), [world/TerrainGen.ts](src/world/TerrariaGen.ts) (extract Terraria micro-biomes), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate micro-biomes).
-- **Do:**
-  1. Extract Terraria's micro-biome algorithms from source (WorldGen.cs lines 18000-20000).
-  2. Implement Terraria's living tree: 20-35 tile tall hollow trunk, internal platforms, massive canopy, treasure room at top.
-  3. Implement Terraria's giant tree: massive trees in forest biomes, 40-60 tiles tall, with trunk houses.
-  4. Implement Terraria's bee hive: honeycomb blocks, bee queen boss room, honey blocks, hive walls.
-  5. Implement Terraria's spider nest: spider nest walls, spider eggs, cocoon blocks, spider den boss room.
-  6. Implement Terraria's marble cave expansion: large marble cave systems with marble guardians.
-  7. Implement Terraria's granite cave expansion: large granite cave systems with granite enemies.
-  8. Implement Terraria's engravings: wall engravings in dungeons and underground structures.
-  9. Implement Terraria's trap doors: some structures have trap doors leading to underground areas.
-  10. Add Terraria's micro-biome loot: each micro-biome has unique loot (bee hive has honey, spider nest has web).
-- **Data:** Terraria-extracted micro-biome parameters (tree heights, hive sizes, cave dimensions), micro-biome tile ids, micro-biome loot tables.
-- **MP:** Micro-biome placement is deterministic — no netcode changes.
-- **Done when:** Forest has giant trees, jungle has living trees, bee hives and spider nests appear, marble/granite caves are larger, each micro-biome has unique loot.
+### Phase 16 — Micro-biomes & set-pieces
+- **Goal:** The small hand-made surprises: spider caves (webs + spiders), bee hives (honey + larva →
+  Queen Bee summon), granite/marble mini-biomes with matching enemies, mahogany jungle temple
+  (reserve as a hardmode/late gate), living trees with root cellars, floating spheres.
+- **Why:** These set-pieces are memorable and give bosses/loot homes.
+- **Prereqs:** 5, 6, 13, 14.
+- **Touch/Create:** micro-biome carving + prefab set-pieces in
+  [world/WorldGen.ts](src/world/WorldGen.ts)/[world/Structures.ts](src/world/Structures.ts), tiles
+  (web, honey, hive, living wood/leaf).
+- **Do:** deterministically place spider nests, bee hives (with a larva node that summons Queen Bee
+  later), granite/marble caves, living trees with hollow interiors + chest. Keep them rare.
+- **MP:** deterministic; summon nodes trigger host-authoritative boss spawns later.
+- **Done when:** exploration surfaces spider caves, bee hives, granite/marble caves, living trees.
 
-### Phase 17 — Biome spread & world evolution (TERRARIA ALGORITHM)
-- **Goal:** Implement Terraria's biome spread system: corruption/crimson spread over time, Hallow spread in hardmode, and purification mechanics.
-- **Why:** Dynamic world changes make the world feel alive. Terraria's spread system is balanced and adds strategic depth.
-- **Prereqs:** 0.5, 1, 2, 3, 7.
-- **Touch/Create:** [world/BiomeSpread.ts](src/world/BiomeSpread.ts) (new file), [world/TerrainGen.ts](src/world/TerrariaGen.ts) (extract Terraria spread), [world/WorldGen.ts](src/world/WorldGen.ts) (integrate spread system).
+### Phase 17 — Biome spread & world evolution (deterministic + networked)
+- **Goal:** Living world rules: grass spreads onto dirt, vines grow down, evil biome (Corruption/
+  Crimson) and (post-hardmode) Hallow spread through susceptible tiles; mud→jungle grass; all
+  host-authoritative and bounded for performance.
+- **Why:** Corruption spread is a Terraria signature and a strategic threat. Grass/vine growth makes
+  the world feel alive.
+- **Prereqs:** 7, plus a world-tick scheduler (introduce here; reused by Phases 61/64/65/68).
+- **Touch/Create:** new `systems/WorldTick.ts` (bounded random-tile updates near active players,
+  host-only), spread rules keyed by tile adjacency, [net/Protocol.ts](src/net/Protocol.ts) (tile
+  updates already replicate as edits — batch them).
 - **Do:**
-  1. Extract Terraria's biome spread algorithm from source (WorldGen.cs lines 20000-21000).
-  2. Implement Terraria's flood-fill spread: starting from evil tiles, spread to neighbors with probability.
-  3. Implement Terraria's spread rates: different blocks convert at different rates (grass converts easily, stone converts slowly).
-  4. Implement Terraria's hardmode Hallow spread: new biome type that spreads, competes with evil biomes.
-  5. Implement Terraria's purification mechanics: purity powder stops spread and converts evil back to normal.
-  6. Implement Terraria's spread acceleration: spread speeds up during blood moon and hardmode.
-  7. Implement Terraria's block resistance: some blocks resist spread (stone more than dirt).
-  8. Implement Terraria's world conversion: when Wall of Flesh is defeated, convert existing ores to hardmode ores.
-  9. Implement Terraria's sunflower effect: sunflowers stop evil spread in their area.
-  10. Add Terraria's spread visualization: show spread edges with particles or visual indicators.
-- **Data:** Terraria-extracted spread parameters (rates, block resistance, hardmode acceleration), purification item rules.
-- **MP:** Biome spread must be host-authoritative simulation (Book VI). For now, implement deterministic placement algorithm.
-- **Done when:** Evil biomes spread gradually over time, Hallow appears in hardmode, purity powder stops spread, world converts on hardmode trigger.
+  1. A host-only world-tick that samples N random tiles/second within loaded chunks and applies
+     growth/spread rules; broadcast resulting edits (batched) to clients.
+  2. Rules: grass→dirt spread, vine growth, evil/hallow spread with the usual susceptibility, mud in
+     jungle grows jungle grass. Add "sunflower/blocked" style barriers later (purity items).
+  3. Keep it bounded (cap updates/frame) so it never tanks fps.
+- **MP:** host runs the tick; edits replicate. Clients never run spread.
+- **Done when:** over time, grass creeps, vines grow, and the evil biome slowly spreads into
+  adjacent susceptible tiles; co-op stays consistent.
 
 ### Phase 18 — Spawn region, guaranteed early structures & world identity
-- **Goal:** Create a refined spawn area with guaranteed early-game structures, tutorial hints, and world-unique landmarks.
-- **Why:** Good spawn areas help players get started. Terraria's spawn area is simple but effective. Enhanced spawn area improves player experience.
-- **Prereqs:** 0.5, 1, 2, 3, 13.
-- **Touch/Create:** [world/SpawnRegion.ts](src/world/SpawnRegion.ts) (new file), [world/WorldGen.ts](src/world/WorldGen.ts) (implement spawn region).
-- **Do:**
-  1. Implement Terraria's spawn point: at surface center, with clean flat area around it.
-  2. Implement guaranteed spawn structures: basic house, workbench, chest with starting items.
-  3. Implement spawn region cleanup: ensure spawn area is flat and safe, no caves or dangerous terrain.
-  4. Implement tutorial structures: sign with basic controls hint, simple mining tutorial area.
-  5. Implement world-unique landmarks: special structure that appears near spawn unique to world seed.
-  6. Implement spawn biome preference: spawn in plains or forest biome (not in dangerous biomes).
-  7. Implement spawn region lighting: ensure spawn area is well-lit for safety.
-  8. Implement spawn region enemies: prevent dangerous enemies from spawning near spawn.
-  9. Implement spawn region trees: guaranteed trees for early wood.
-  10. Add spawn region customization: allow player to choose spawn biome via advanced options.
-- **Data:** Spawn region radius, guaranteed structure list, starting item list, spawn biome preferences.
-- **MP:** Spawn region is deterministic — no netcode changes.
-- **Done when:** Spawn area is safe and flat, has guaranteed starting items, has tutorial hints, has unique landmark, enemies don't spawn near spawn.
+- **Goal:** Make "near spawn" a coherent starting area: a guaranteed safe-ish spawn zone, a nearby
+  surface structure or two, guaranteed early ore/wood, and a defined world spawn point the player
+  returns to on death.
+- **Why:** Terraria worlds have a hand-tuned spawn feel; infinite procedural worlds need a curated
+  origin so new games start well.
+- **Prereqs:** 3, 13, 14; ties to respawn in [engine/Game.ts](src/engine/Game.ts).
+- **Touch/Create:** [world/WorldGen.ts](src/world/WorldGen.ts) (spawn-region shaping),
+  [engine/Game.ts](src/engine/Game.ts) (`spawnPlayer` already uses `surfaceHeight(0)` — formalize a
+  world spawn point + bed/spawn-point later).
+- **Do:** guarantee a walkable, not-underwater, not-evil spawn column; scatter starter trees + a bit
+  of surface copper nearby; optionally a small ruined structure to loot immediately.
+- **MP:** host defines spawn; clients receive it in the welcome handshake.
+- **Done when:** every new seed starts on solid, safe ground with something to do within 30 seconds.
 
 ### Phase 19 — Worldgen debug & seed-tuning panel
-- **Goal:** Create a debug panel for world generation visualization, seed testing, and parameter tuning.
-- **Why:** Debug tools help understand and tune world generation. Terraria's debug mode is very useful for development.
-- **Prereqs:** 0.5, 1-18.
-- **Touch/Create:** [ui/WorldGenDebug.ts](src/ui/WorldGenDebug.ts) (new file), [world/WorldGen.ts](src/world/WorldGen.ts) (add debug hooks).
-- **Do:**
-  1. Implement world generation visualization: show heatmaps of biome distribution, ore density, cave density.
-  2. Implement seed testing interface: enter seed, preview world statistics, compare seeds.
-  3. Implement parameter tuning: sliders for noise parameters, see real-time terrain changes.
-  4. Implement biome distribution graph: show percentage of each biome in world.
-  5. Implement structure count display: show how many of each structure type generated.
-  6. Implement chunk generation profiling: show time per pass, identify bottlenecks.
-  7. Implement noise visualization: show 2D noise field images for different octaves.
-  8. Implement export world statistics: save biome/ore/structure counts to file.
-  9. Implement seed sharing: copy/paste seed strings with world parameters.
-  10. Add preset seeds: famous seeds, challenge seeds, balanced seeds.
-- **Data:** Debug panel UI components, visualization algorithms, preset seed list.
-- **MP:** Debug panel is local only — no netcode changes.
-- **Done when:** Debug panel shows world stats, seed testing works, parameter tuning changes terrain in real-time, noise fields can be visualized.
+- **Goal:** A developer overlay to inspect and tune generation: biome map strip, structure/loot
+  markers, cave/ore threshold sliders, "teleport to nearest X", seed field, regenerate.
+- **Why:** Speeds up all future worldgen tuning and lets the owner validate variety quickly. The game
+  already has debug warps (`T`/`Y`) and reseed (`G`).
+- **Prereqs:** 1–18 (uses everything).
+- **Touch/Create:** new `ui/DebugPanel.ts` (DOM overlay, dev-only toggle), reads from `WorldGen`/
+  `BiomeSystem`.
+- **Do:** minimap-style biome strip along x; markers for structures/ores/chests/bosses-arenas;
+  sliders that live-tweak `config` gen values and reseed; "find nearest dungeon/ocean/evil".
+- **MP:** local dev tool only; never affects sim.
+- **Done when:** toggling the panel shows the world's structure and lets the owner tune gen live.
 
 ### Phase 20 — World persistence (IndexedDB save/load)
-- **Goal:** Implement full world persistence using IndexedDB so worlds survive browser refresh and can be loaded/saved.
-- **Why:** Current worlds die on refresh. Persistence is essential for a real game. IndexedDB is perfect for browser-based storage.
-- **Prereqs:** 0.5, 1-19.
-- **Touch/Create:** [world/WorldPersistence.ts](src/world/WorldPersistence.ts) (new file), [world/ChunkManager.ts](src/world/ChunkManager.ts) (integrate persistence), [ui/Menu.ts](src/ui/Menu.ts) (add save/load UI).
+- **Goal:** Worlds and progress survive a refresh: save edit deltas + chest contents + world flags +
+  entities + time to IndexedDB; load on return; autosave; multiple named worlds.
+- **Why:** Right now everything is in-memory (worlds die on refresh). Persistence is mandatory for a
+  real game and for hosts to keep a world.
+- **Prereqs:** 1, 14, 17 (world flags/time exist). Reuses `ChunkManager.exportDeltas/importDeltas`.
+- **Touch/Create:** new `systems/Save.ts` (IndexedDB wrapper), [engine/Game.ts](src/engine/Game.ts)
+  (autosave + load), [ui/Menu.ts](src/ui/Menu.ts) (world select/create/delete),
+  [Profile.ts](src/Profile.ts) (link characters to saves).
 - **Do:**
-  1. Implement IndexedDB database schema: store world metadata, chunk data, player state, edits.
-  2. Implement world save system: save world seed, all generated chunks, player edits, time, etc.
-  3. Implement world load system: load world from IndexedDB, restore state, resume at player position.
-  4. Implement world list UI: show all saved worlds with metadata (seed, play time, last played).
-  5. Implement world deletion: remove world from IndexedDB.
-  6. Implement world export: export world as JSON file for backup/sharing.
-  7. Implement world import: import world from JSON file.
-  8. Implement auto-save: save world every 5 minutes or on major actions.
-  9. Implement save compression: compress chunk data to save storage space.
-  10. Implement save validation: detect corrupted saves, offer recovery options.
-- **Data:** IndexedDB schema definition, save/load UI components, compression parameters.
-- **MP:** World save/load is local only. When world is loaded, host sends world seed to clients so they generate the same world.
-- **Done when:** Worlds can be saved/loaded, world list shows saved worlds, worlds survive browser refresh, export/import works.
+  1. Serialize: seed, edit deltas, chest contents, world flags (evil type, bosses defeated, dungeon
+     unlocked), world time/season, discovered map, entity persistence where relevant.
+  2. IndexedDB store keyed by world id; autosave on interval + on leave; load on select.
+  3. Menu: create/select/delete worlds; characters (Book III) saved separately (inventory, HP/mana
+     tiers, equipment) so a character can enter any world (Terraria-style).
+- **MP:** the **host** owns the authoritative save; on host start it loads, on client join it receives
+  the current delta set (already in the welcome). Clients don't persist the world, only their own
+  character.
+- **Done when:** build a base, refresh, and it's still there; multiple worlds/characters selectable
+  from the menu.
 
 ---
 

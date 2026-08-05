@@ -8,6 +8,13 @@ export const CHUNK_PIXELS = TILE_SIZE * CHUNK_SIZE;
 // How many chunks beyond the visible rectangle to keep resident before unloading.
 export const VIEW_MARGIN_CHUNKS = 2;
 
+// Pre-generation (Phase 0.5): keep a larger ring of chunks generated ahead of the player so the
+// view+margin is always already resident — no synchronous generation (and thus no frame hitch) as
+// you walk. The ring fills gradually in the background, a bounded number of chunks per tick.
+export const PRELOAD_RADIUS_CHUNKS = 5; // chunks generated beyond the view margin
+export const PRELOAD_MAX_PER_TICK = 8; // hard cap on background chunks generated per update tick
+export const PRELOAD_TIME_MS = 5; // …and stop early once this much time has been spent, to protect the frame
+
 export const DEFAULT_SEED = 1337;
 
 // Rendering / camera --------------------------------------------------------

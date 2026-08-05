@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, VIEW_MARGIN_CHUNKS } from "../config";
+import { CHUNK_SIZE, VIEW_MARGIN_CHUNKS, PRELOAD_RADIUS_CHUNKS, PRELOAD_MAX_PER_TICK, PRELOAD_TIME_MS } from "../config";
 import { Chunk, chunkKey, tileIndex } from "./Chunk";
 import { WorldGen } from "./WorldGen";
 import { TileId, isSolid } from "./Tile";
@@ -69,6 +69,13 @@ export class ChunkManager {
   /**
    * Stream chunks so everything inside the tile rectangle (+ margin) is resident and anything
    * well outside it is dropped. Keeps memory flat no matter how far the player travels.
+   *
+   * Two tiers:
+   *  1. View + margin is ensured SYNCHRONOUSLY every tick, so a frame never renders an incomplete
+   *     chunk (this also makes teleporting instant — the destination view is built before it draws).
+   *  2. A larger preload ring is filled in the BACKGROUND, a bounded number of chunks per tick,
+   *     nearest-first — so by the time the player walks into those chunks they're already resident
+   *     and no generation happens at the view edge (no streaming hitch).
    */
   update(minTileX: number, minTileY: number, maxTileX: number, maxTileY: number): void {
     const minCx = floorDiv(minTileX, CHUNK_SIZE) - VIEW_MARGIN_CHUNKS;
@@ -76,20 +83,44 @@ export class ChunkManager {
     const minCy = floorDiv(minTileY, CHUNK_SIZE) - VIEW_MARGIN_CHUNKS;
     const maxCy = floorDiv(maxTileY, CHUNK_SIZE) + VIEW_MARGIN_CHUNKS;
 
+    // Tier 1 — must be ready to render this frame.
     for (let cy = minCy; cy <= maxCy; cy++) {
       for (let cx = minCx; cx <= maxCx; cx++) {
         this.ensureChunk(cx, cy);
       }
     }
 
-    // Unload chunks that drifted outside the (margin-padded) window. Deltas are retained.
-    const dropPad = 1;
+    // Tier 2 — background pre-generation of the surrounding ring, budget-limited and nearest-first.
+    const pMinCx = minCx - PRELOAD_RADIUS_CHUNKS, pMaxCx = maxCx + PRELOAD_RADIUS_CHUNKS;
+    const pMinCy = minCy - PRELOAD_RADIUS_CHUNKS, pMaxCy = maxCy + PRELOAD_RADIUS_CHUNKS;
+    const ccx = (minCx + maxCx) / 2, ccy = (minCy + maxCy) / 2;
+    const missing: { cx: number; cy: number; d2: number }[] = [];
+    for (let cy = pMinCy; cy <= pMaxCy; cy++) {
+      for (let cx = pMinCx; cx <= pMaxCx; cx++) {
+        if (cx >= minCx && cx <= maxCx && cy >= minCy && cy <= maxCy) continue; // already ensured
+        if (this.chunks.has(chunkKey(cx, cy))) continue;
+        const dx = cx - ccx, dy = cy - ccy;
+        missing.push({ cx, cy, d2: dx * dx + dy * dy });
+      }
+    }
+    if (missing.length > 0) {
+      missing.sort((a, b) => a.d2 - b.d2);
+      const t0 = performance.now();
+      const cap = Math.min(PRELOAD_MAX_PER_TICK, missing.length);
+      for (let i = 0; i < cap; i++) {
+        this.ensureChunk(missing[i].cx, missing[i].cy);
+        if (performance.now() - t0 > PRELOAD_TIME_MS) break; // don't blow the frame budget
+      }
+    }
+
+    // Unload chunks that drifted outside the preload window (+ pad). Deltas are retained.
+    const dropPad = 2;
     for (const [key, chunk] of this.chunks) {
       if (
-        chunk.cx < minCx - dropPad ||
-        chunk.cx > maxCx + dropPad ||
-        chunk.cy < minCy - dropPad ||
-        chunk.cy > maxCy + dropPad
+        chunk.cx < pMinCx - dropPad ||
+        chunk.cx > pMaxCx + dropPad ||
+        chunk.cy < pMinCy - dropPad ||
+        chunk.cy > pMaxCy + dropPad
       ) {
         this.chunks.delete(key);
       }
