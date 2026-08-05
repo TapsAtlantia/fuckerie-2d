@@ -131,6 +131,18 @@ export const enum TileId {
   PearlStone = 92,
   HallowedGrass = 93,
   PearlSand = 94,
+
+  // --- Phase 8: the Dungeon (append-only) ---
+  DungeonBrickBlue = 95,
+  DungeonBrickGreen = 96,
+  DungeonBrickPink = 97,
+  DungeonWallBlue = 98, // bg walls
+  DungeonWallGreen = 99,
+  DungeonWallPink = 100,
+  Spike = 101,
+  Cobweb = 102,
+  GoldChest = 103, // locked dungeon chest (loot filled in Phase 14)
+  DungeonDoor = 104, // boss-gated entrance (locked until Skeletron, Phase 51)
 }
 
 export type TileCategory =
@@ -311,6 +323,18 @@ export const TILE_PROPS: readonly TileProps[] = [
   { name: "pearlstone", solid: true, hardness: 1.6, color: [222, 214, 234], lightEmit: 0, category: "stone", drop: TileId.PearlStone, texture: "dither" },
   { name: "hallowed grass", solid: true, hardness: 0.5, color: [120, 206, 224], lightEmit: 0, category: "natural", drop: TileId.PearlStone, texture: "dither", tint: true },
   { name: "pearlsand", solid: true, hardness: 0.6, color: [232, 222, 238], lightEmit: 0, category: "sand", drop: TileId.PearlSand, texture: "dither" },
+
+  // Phase 8 dungeon tiles.
+  { name: "blue dungeon brick", solid: true, hardness: 2.0, color: [58, 66, 104], lightEmit: 0, category: "structure", drop: TileId.DungeonBrickBlue, texture: "flat" },
+  { name: "green dungeon brick", solid: true, hardness: 2.0, color: [54, 92, 74], lightEmit: 0, category: "structure", drop: TileId.DungeonBrickGreen, texture: "flat" },
+  { name: "pink dungeon brick", solid: true, hardness: 2.0, color: [110, 66, 96], lightEmit: 0, category: "structure", drop: TileId.DungeonBrickPink, texture: "flat" },
+  { name: "blue dungeon wall", solid: false, hardness: 1.0, color: [34, 40, 66], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "green dungeon wall", solid: false, hardness: 1.0, color: [32, 56, 46], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "pink dungeon wall", solid: false, hardness: 1.0, color: [68, 40, 60], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+  { name: "spikes", solid: true, hardness: 1.6, color: [120, 122, 134], lightEmit: 0, category: "structure", drop: null, texture: "flat" },
+  { name: "cobweb", solid: false, hardness: 0.1, color: [214, 218, 228], lightEmit: 0, category: "deco", drop: null, texture: "flat" },
+  { name: "gold chest", solid: true, hardness: 2.0, color: [214, 180, 74], lightEmit: 20, category: "deco", drop: null, texture: "fleck" },
+  { name: "dungeon door", solid: true, hardness: 8.0, color: [96, 84, 128], lightEmit: 0, category: "structure", drop: null, texture: "flat" },
 ];
 
 export function tile(id: number): TileProps {

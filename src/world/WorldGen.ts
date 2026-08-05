@@ -10,6 +10,7 @@ import { StructureSystem } from "./Structures";
 import { MicroBiomeSystem } from "./MicroBiomes";
 import { BiomeModifierSystem } from "./BiomeModifiers";
 import { TreeSystem } from "./Trees";
+import { DungeonSystem } from "./Dungeon";
 
 // Procedural terrain. Pure function of (seed, worldX, worldY): the same coordinate always
 // generates the same tile no matter how the player reached it, which is what lets the world
@@ -28,6 +29,7 @@ export class WorldGen {
   private microBiomeSystem: MicroBiomeSystem;
   private biomeModifierSystem: BiomeModifierSystem;
   private treeSystem: TreeSystem;
+  private dungeon: DungeonSystem;
   readonly seed: number;
 
   constructor(seed: number) {
@@ -45,6 +47,7 @@ export class WorldGen {
     );
     this.microBiomeSystem = new MicroBiomeSystem(seed);
     this.biomeModifierSystem = new BiomeModifierSystem(seed);
+    this.dungeon = new DungeonSystem(seed, (x) => this.surfaceHeight(x));
   }
 
   /** Absolute world-Y (in tiles) of the topmost solid tile at a given column. */
@@ -425,6 +428,22 @@ export class WorldGen {
       if (lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_SIZE) {
         chunk.fg[ly * CHUNK_SIZE + lx] = tiles.fg;
         chunk.bg[ly * CHUNK_SIZE + lx] = tiles.bg;
+      }
+    }
+
+    // The Dungeon: a large world-anchored structure overlaid last (takes priority over terrain). Each
+    // tile is a pure function of world coords, so the footprint stamps identically across chunks/peers.
+    if (this.dungeon.overlaps(baseX, baseY, baseX + CHUNK_SIZE - 1, baseY + CHUNK_SIZE - 1)) {
+      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const t = this.dungeon.tileAt(baseX + lx, baseY + ly);
+          if (t) {
+            const idx = ly * CHUNK_SIZE + lx;
+            chunk.fg[idx] = t.fg;
+            chunk.bg[idx] = t.bg;
+            chunk.liquid[idx] = 0; // dungeon interiors are dry
+          }
+        }
       }
     }
 
