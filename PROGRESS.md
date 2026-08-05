@@ -1,0 +1,157 @@
+# PROGRESS — MASTERPLAN execution tracker
+
+Execute `MASTERPLAN.md` **top to bottom, one phase at a time.** After each phase: typecheck clean →
+headless logic tests (where applicable) → `npm run build:artifact` → redeploy the Artifact (same URL)
+→ run the phase's Definition of Done → tick the box below → update the project memory → tell the owner
+what to try. Do **not** batch across the deploy boundary unless the owner says so.
+
+**Legend:** ☐ not started · ◐ in progress · ☑ done · ⤷ note/deferred
+
+**Invariants (never break):** deterministic worldgen (pure fn of seed+coords, no `Math.random` in
+gen) · self-contained/CSP-safe (no CDN, inline assets, WebAudio only) · multiplayer host-authoritative
+· 60 fps · no regression to streaming/mining/placing/lighting/co-op · tunables in `config.ts` · tile
+ids append-only.
+
+---
+
+## Book I — World & Structure Generation
+- ☑ 1. Tile-system foundation & 16-bit tiles (Uint16 fg/bg, tile metadata, protocolVersion) — deployed; verified via `scripts/phase1-check.ts`
+- ☐ 2. Background wall system overhaul (distinct walls + wall autotiling + natural wall gen)
+- ☐ 3. Surface landform realism & deterministic rivers
+- ☐ 4. Ore & vein rework (tiered, depth-gated, hardmode ids reserved)
+- ☐ 5. Cave-system deep rework (spaghetti + cheese + caverns)
+- ☐ 6. Underground biomes (jungle/ice/desert/marble/granite/glowing-mushroom)
+- ☐ 7. Evil biomes: Corruption & Crimson (+ reserve Hallow)
+- ☐ 8. The Dungeon (large multi-chunk structure + locked loot + boss gate)
+- ☐ 9. The Underworld / Hell (lava seas, hellstone, ruined houses, hellforge)
+- ☐ 10. Sky / floating islands with loot
+- ☐ 11. Oceans, beaches & underwater caves
+- ☐ 12. River/lake/aquifer integration & water polish
+- ☐ 13. Prefab structure library & authoring pipeline (big expansion)
+- ☐ 14. Chests, loot tables & pots
+- ☐ 15. Life crystals, mana crystals, altars, shrines, gems
+- ☐ 16. Micro-biomes & set-pieces (spider caves, bee hives, living trees…)
+- ☐ 17. Biome spread & world evolution (world tick, host-authoritative)
+- ☐ 18. Spawn region, guaranteed early structures & world identity
+- ☐ 19. Worldgen debug & seed-tuning panel
+- ☐ 20. World persistence (IndexedDB save/load)
+
+## Book II — Items, Materials & Crafting
+- ☐ 21. Item model overhaul & registry (classes/rarity/stats/tooltips/icons)
+- ☐ 22. Tools (pickaxe/axe/hammer tiers) & tool-gated mining
+- ☐ 23. Coins & the money system
+- ☐ 24. Materials, bars & monster/material drops
+- ☐ 25. Crafting system & recipe engine
+- ☐ 26. Crafting stations & proximity
+- ☐ 27. Smelting & the ore→bar→gear chain
+- ☐ 28. Storage: chests, banks & the container UI
+- ☐ 29. Inventory UX overhaul
+- ☐ 30. Consumables & potions (alchemy)
+
+## Book III — Player, Combat & Equipment
+- ☐ 31. Player stats & attributes (HP tiers/mana/defense/damage classes/crit)
+- ☐ 32. Equipment slots, armor/accessory framework & set bonuses
+- ☐ 33. Armor content (pre-hardmode sets)
+- ☐ 34. Accessories & movement kit (grappling hook, wings, boots)
+- ☐ 35. Melee weapons & the swing system
+- ☐ 36. Ranged weapons, ammo & the projectile engine (shared)
+- ☐ 37. Magic weapons & mana
+- ☐ 38. Summoner class: minions & sentries
+- ☐ 39. Item drops as world entities (loot pickup)
+- ☐ 40. Combat feel & juice (damage numbers, hit-stop, shake, gore)
+- ☐ 41. Buffs & debuffs (status effects)
+- ☐ 42. Player animation, held items & armor rendering
+
+## Book IV — Enemies, Bosses & Events
+- ☐ 43. Enemy framework (data-driven registry)
+- ☐ 44. AI behavior library
+- ☐ 45. Spawn director
+- ☐ 46. Enemy content wave 1 (pre-boss roster)
+- ☐ 47. Loot & drop tables (enemies)
+- ☐ 48. Boss framework
+- ☐ 49. Boss 1: the Eye (first boss)
+- ☐ 50. Boss 2: the Devourer / Brain (evil-biome boss)
+- ☐ 51. Boss 3: Skeletron (dungeon guardian) & dungeon unlock
+- ☐ 52. Boss 4: Wall of Flesh → Hardmode trigger
+- ☐ 53. World events (Blood Moon, Goblin Army, Eclipse, invasions)
+- ☐ 54. Meteors & dynamic world events
+
+## Book V — NPCs, Town & Economy
+- ☐ 55. NPC framework & housing
+- ☐ 56. NPC roster & move-in conditions
+- ☐ 57. Shops & the coin economy
+- ☐ 58. Happiness, biome preferences & pylons
+- ☐ 59. Quests & the bulletin board
+- ☐ 60. Player home base tools (bed/spawn, flags, respawn)
+
+## Book VI — World Simulation & Time
+- ☐ 61. Day/night cycle & game clock
+- ☐ 62. Weather (rain, storms, snow, sandstorms)
+- ☐ 63. Seasons (Stardew hybrid)
+- ☐ 64. Dynamic liquids (re-enable, networked)
+- ☐ 65. Tile mechanics: gravity, growth, farming-hooks
+- ☐ 66. Fire, explosions & environmental hazards
+- ☐ 67. Wiring & mechanisms (Terraria logic layer)
+
+## Book VII — Farming, Fishing & Life-sim (Stardew hybrid)
+- ☐ 68. Farming (crops, soil, growth)
+- ☐ 69. Fishing
+- ☐ 70. Cooking & food buffs
+- ☐ 71. Critters, nets & terrariums
+
+## Book VIII — Automation & Industry (Mindustry hybrid)
+- ☐ 72. Item transport: conveyors & item logistics
+- ☐ 73. Machines: drills, smelters, assemblers
+- ☐ 74. Power networks
+- ☐ 75. Logistics & full factory loop
+- ☐ 76. Turrets & automated defense
+
+## Book IX — Presentation, Audio & Juice
+- ☐ 77. Audio engine (WebAudio, CSP-safe)
+- ☐ 78. SFX content & hookup
+- ☐ 79. Adaptive music
+- ☐ 80. Lighting overhaul (smooth, colored, day/night-integrated)
+- ☐ 81. Particle & VFX overhaul
+- ☐ 82. Sky & background overhaul
+- ☐ 83. Screen effects
+- ☐ 84. Full HUD & UI overhaul
+- ☐ 85. Minimap & world map
+- ☐ 86. Character render polish & dyes
+
+## Book X — Multiplayer Hardening  (verify on GitHub Pages, not the Artifact)
+- ☐ 87. Replication framework & interest management
+- ☐ 88. Networked combat, projectiles & hit reconciliation
+- ☐ 89. Networked enemies, bosses & events
+- ☐ 90. Networked inventory, chests, crafting & the trust model
+- ☐ 91. Networked world simulation
+- ☐ 92. Join/leave robustness, state transfer & reconnection
+- ☐ 93. Latency handling: interpolation, prediction, lag comp
+- ☐ 94. Social layer: identity, chat, emotes, lobby
+
+## Book XI — Persistence, Scale, Hardmode & Polish
+- ☐ 95. Full save/character system
+- ☐ 96. Hardmode: world conversion & new tiers
+- ☐ 97. Mechanical & late bosses
+- ☐ 98. Biome & content breadth (4D biome matrix + more)
+- ☐ 99. Balance, difficulty modes & progression pass
+- ☐ 100. Bestiary, achievements & in-game guide
+- ☐ 101. Performance & scale (60fps-everywhere pass)
+- ☐ 102. Controls, input & accessibility
+- ☐ 103. QA, deterministic tests & release pipeline
+
+## Book XII — Beyond Terraria (differentiators)
+- ☐ 104. Truly seamless infinite world identity
+- ☐ 105. Deep automation × survival fusion
+- ☐ 106. Farming/seasons life-sim depth
+- ☐ 107. Superior building & creativity tools
+- ☐ 108. Co-op-first content
+- ☐ 109. Modding / data-driven content hooks
+- ☐ 110. Endgame, "the last update" & living-world features
+
+---
+
+### Deviation log
+_Record here any place reality diverged from the plan (a phase split, a reorder, a wrong assumption).
+Keep the invariants; ask the owner before expensive/user-facing deviations._
+
+- (none yet)

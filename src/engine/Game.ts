@@ -13,7 +13,7 @@ import { RemotePlayer } from "../entities/RemotePlayer";
 import { TileId, isSolid, tile } from "../world/Tile";
 import type { Profile } from "../Profile";
 import type { Net } from "../net/Net";
-import type { NetMessage } from "../net/Protocol";
+import { PROTOCOL_VERSION, type NetMessage } from "../net/Protocol";
 import { Inventory } from "../player/Inventory";
 import { InventoryUI } from "../ui/InventoryUI";
 import { itemFromTile } from "../items/Item";
@@ -208,6 +208,11 @@ export class Game {
       case "welcome":
         if (this.mode === "client" && !this.started) {
           clearTimeout(this.welcomeTimer);
+          if (msg.protocolVersion !== PROTOCOL_VERSION) {
+            this.opts.onError?.("Version mismatch — the host is running a different game version.");
+            this.leave();
+            break;
+          }
           this.beginWorld(msg.seed);
           this.world.importDeltas(msg.deltas);
           this.beginLoop();

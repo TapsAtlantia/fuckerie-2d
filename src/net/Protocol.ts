@@ -1,5 +1,9 @@
 import type { Profile } from "../Profile";
 
+// Bumped whenever the wire format changes (message shapes, tile-id width, delta encoding, …). Peers
+// with different versions must not connect. Bump this on any breaking net/protocol change.
+export const PROTOCOL_VERSION = 2;
+
 // Wire format for peer-to-peer messages. Because world generation is deterministic, peers only
 // ever exchange a seed + tile edits + player states — never whole chunks.
 
@@ -16,12 +20,14 @@ export interface HelloMsg {
   type: "hello";
   from: string;
   profile: Profile;
+  protocolVersion: number;
 }
 
 // Host → joining client: everything needed to reproduce the host's world.
 export interface WelcomeMsg {
   type: "welcome";
   from: string;
+  protocolVersion: number;
   seed: number;
   hostProfile: Profile;
   deltas: DeltaEntry[];

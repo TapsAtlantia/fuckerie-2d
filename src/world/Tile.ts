@@ -1,5 +1,6 @@
-// Tile catalogue. Phase 2 expands to ~50-60 tiles for biomes, ores, structures, vegetation.
-// Kept under 256 to fit in Uint8Array fg/bg arrays in Chunk.ts.
+// Tile catalogue. Tile ids are 16-bit (Uint16Array fg/bg in Chunk.ts) so there is no practical
+// ceiling. IMPORTANT: ids are STABLE + APPEND-ONLY — saves, edit deltas, and net messages all
+// reference ids by number, so never reorder or renumber existing tiles; only append new ones.
 
 export const enum TileId {
   Air = 0,
@@ -95,6 +96,20 @@ export type TileCategory =
 
 export type TileTexture = "flat" | "dither" | "twoTone" | "fleck";
 
+// Which tool best/must mine a tile (Phase 22 tool-gated mining consumes this).
+export const enum ToolType { None = 0, Pick = 1, Axe = 2, Hammer = 3 }
+
+// Per-tile behaviour flags (bitset). Later phases consume these (falling sand, fire, ladders, …).
+export const enum TileFlag {
+  Falls = 1 << 0, // affected by gravity (sand/gravel)
+  Flammable = 1 << 1, // can burn
+  Climbable = 1 << 2, // ladders/vines/ropes
+  Platform = 1 << 3, // one-way platform
+  Interactive = 1 << 4, // right-click interact (chest/door/station)
+  NaturalOnly = 1 << 5, // only generated, not player-placeable
+  NoDrop = 1 << 6, // yields nothing when mined
+}
+
 export interface TileProps {
   name: string;
   solid: boolean;
@@ -105,6 +120,15 @@ export interface TileProps {
   drop: TileId | null; // item yielded when mined; null = nothing, self = itself
   texture: TileTexture;
   tint?: boolean; // if true, apply hash-based brightness variation
+  // --- Structured metadata (all optional; sensible defaults derived by the helpers below, so
+  //     adding a tile never requires touching every row). Later books read these. ---
+  tier?: number; // mining power required to break it (0 = anything)
+  mergeGroup?: number; // autotile blend group (default: own id)
+  wall?: number; // default background wall id this block forms a natural layer with
+  blastResistance?: number; // resistance to explosions (default derived from hardness)
+  flags?: number; // TileFlag bitset override
+  toolType?: ToolType; // override the tool used to mine it
+  soundGroup?: string; // footstep/mining sound bucket
 }
 
 // Indexed by TileId. Order must match the enum.
@@ -252,4 +276,72 @@ export function canSlope(id: number): boolean {
 /** Whether a tile connects (for auto-tiling edge detection) — any solid block. */
 export function connectsForAutotile(id: number): boolean {
   return isSolid(id);
+}
+
+// --- Phase 1: structured metadata accessors (value from the row, else a category-derived default) ---
+
+/** Which tool mines this tile best/required. */
+export function tileToolType(id: number): ToolType {
+  const p = TILE_PROPS[id];
+  if (!p) return ToolType.None;
+  if (p.toolType !== undefined) return p.toolType;
+  if (p.category === "wood") return ToolType.Axe;
+  return ToolType.Pick; // dirt/sand/stone/ore/gem/ice all mine with a pick in Terraria
+}
+
+/** Mining power required to break the tile (Phase 22 gates deep ore behind better picks). */
+export function tileTier(id: number): number {
+  const p = TILE_PROPS[id];
+  if (!p) return 0;
+  if (p.tier !== undefined) return p.tier;
+  const h = p.hardness;
+  return h < 1 ? 0 : h < 1.5 ? 1 : h < 2 ? 2 : 3;
+}
+
+/** Behaviour flags for the tile (falling sand, flammable, climbable, …). */
+export function tileFlags(id: number): number {
+  const p = TILE_PROPS[id];
+  if (!p) return 0;
+  if (p.flags !== undefined) return p.flags;
+  let f = 0;
+  if (id === TileId.Sand || id === TileId.Gravel) f |= TileFlag.Falls;
+  if (p.category === "wood" || id === TileId.Planks || id === TileId.Bookshelf || id === TileId.Hay) f |= TileFlag.Flammable;
+  if (id === TileId.Vines) f |= TileFlag.Climbable;
+  if (p.drop === null && !p.solid) f |= TileFlag.NoDrop;
+  return f;
+}
+export function hasTileFlag(id: number, flag: TileFlag): boolean {
+  return (tileFlags(id) & flag) !== 0;
+}
+
+/** Auto-tile blend group (defaults to the tile's own id — only same-group tiles merge). */
+export function tileMergeGroup(id: number): number {
+  return TILE_PROPS[id]?.mergeGroup ?? id;
+}
+
+/** Default background wall this block forms a natural layer with (0 = none). */
+export function tileWall(id: number): number {
+  return TILE_PROPS[id]?.wall ?? 0;
+}
+
+/** Explosion resistance (defaults to a multiple of hardness). */
+export function tileBlastResistance(id: number): number {
+  const p = TILE_PROPS[id];
+  if (!p) return 0;
+  return p.blastResistance ?? p.hardness * 10;
+}
+
+/** Footstep/mining sound bucket. */
+export function tileSoundGroup(id: number): string {
+  const p = TILE_PROPS[id];
+  if (!p) return "generic";
+  if (p.soundGroup !== undefined) return p.soundGroup;
+  switch (p.category) {
+    case "stone": case "ore": case "gem": return "stone";
+    case "wood": return "wood";
+    case "sand": return "sand";
+    case "ice": return "ice";
+    case "plant": case "deco": return "grass";
+    default: return "generic";
+  }
 }

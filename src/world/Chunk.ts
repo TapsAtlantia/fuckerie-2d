@@ -18,15 +18,17 @@ export function tileIndex(lx: number, ly: number): number {
 export class Chunk {
   readonly cx: number;
   readonly cy: number;
-  readonly fg: Uint8Array; // foreground tile ids
-  readonly bg: Uint8Array; // background wall tile ids
+  // Tile ids are 16-bit so the world can hold hundreds of blocks/walls/furniture/ores/machines
+  // (well past the old 256 ceiling). Liquid stays 8-bit — it encodes a level + type flag, not an id.
+  readonly fg: Uint16Array; // foreground tile ids
+  readonly bg: Uint16Array; // background wall tile ids
   readonly liquid: Uint8Array; // liquid state (see Liquid.ts encoding)
 
   constructor(cx: number, cy: number) {
     this.cx = cx;
     this.cy = cy;
-    this.fg = new Uint8Array(AREA); // defaults to Air (0)
-    this.bg = new Uint8Array(AREA);
+    this.fg = new Uint16Array(AREA); // defaults to Air (0)
+    this.bg = new Uint16Array(AREA);
     this.liquid = new Uint8Array(AREA);
   }
 

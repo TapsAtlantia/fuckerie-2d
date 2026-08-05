@@ -1,6 +1,6 @@
 import Peer, { type DataConnection } from "peerjs";
 import type { Profile } from "../Profile";
-import { RELAYED, type DeltaEntry, type NetMessage, type NetStatus } from "./Protocol";
+import { PROTOCOL_VERSION, RELAYED, type DeltaEntry, type NetMessage, type NetStatus } from "./Protocol";
 
 // Serverless P2P transport over WebRTC (PeerJS default cloud broker for signaling).
 // Star topology: the host is the hub; clients connect only to the host, which relays
@@ -104,7 +104,7 @@ export class Net {
           clearTimeout(timer);
           this.conns.set(conn.peer, conn);
           this.setupClientConn(conn);
-          this.safeSend(conn, { type: "hello", from: id, profile: this.profile });
+          this.safeSend(conn, { type: "hello", from: id, profile: this.profile, protocolVersion: PROTOCOL_VERSION });
           this.emitStatus();
           resolve();
         });
@@ -125,8 +125,13 @@ export class Net {
     conn.on("data", (data) => {
       const msg = data as NetMessage;
       if (msg.type === "hello") {
+        // Reject peers on a mismatched protocol version (never send them a world).
+        if (msg.protocolVersion !== PROTOCOL_VERSION) {
+          conn.close();
+          return;
+        }
         const payload = this.onWelcomeRequest?.();
-        if (payload) this.safeSend(conn, { type: "welcome", from: this.myId, ...payload });
+        if (payload) this.safeSend(conn, { type: "welcome", from: this.myId, protocolVersion: PROTOCOL_VERSION, ...payload });
         this.onMessage?.(msg);
         return;
       }
