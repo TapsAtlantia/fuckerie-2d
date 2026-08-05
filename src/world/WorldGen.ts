@@ -142,6 +142,7 @@ export class WorldGen {
     const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
     const topBlockCache: TileId[] = new Array(CHUNK_SIZE);
     const caveFloorCache: number[] = new Array(CHUNK_SIZE);
+    const mouthOpenCache: number[] = new Array(CHUNK_SIZE); // tiles carved open for a cave mouth
     const waterTopCache: number[] = new Array(CHUNK_SIZE); // water-surface Y per column (Infinity = dry)
     const beachCache: boolean[] = new Array(CHUNK_SIZE); // shore/bed column → sandy top
     const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
@@ -181,6 +182,7 @@ export class WorldGen {
       else topBlockCache[lx] = biome.topBlock;
 
       caveFloorCache[lx] = this.caveSystem.caveFloor(worldX, slope);
+      mouthOpenCache[lx] = this.caveSystem.mouthOpening(worldX, slope);
       waterTopCache[lx] = waterTopExt[lx + BEACH.RADIUS];
 
       // Check for micro-biomes (coarse check per column)
@@ -247,8 +249,13 @@ export class WorldGen {
           fg = TileId.Sand;
         }
 
-        // Carve caves below the crust; in rare "entrance" columns the floor drops to 1 so a cave
-        // that reaches the surface opens as an organic mouth (only where a tunnel actually exists).
+        // Carve an organic cave mouth into steep hillsides (a rounded notch that connects to the
+        // caves below via the lowered crust). Only at mouth sites on steep slopes — never flat ground.
+        if (belowSurface < mouthOpenCache[lx]) {
+          fg = TileId.Air;
+        }
+
+        // Carve caves below the crust; at a mouth the crust is 1, so the cave breaks into the notch.
         if (belowSurface >= caveFloorCache[lx] && this.caveSystem.caveAt(worldX, worldY, biome.caveStyle)) {
           fg = TileId.Air;
         }

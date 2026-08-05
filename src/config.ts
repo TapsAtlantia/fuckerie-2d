@@ -82,12 +82,14 @@ export const CAVE = {
 
   SURFACE_CRUST: 6, // solid tiles above any cave on normal ground (no random surface pits)
 
-  // Organic aboveground cave mouths: only on steep mountainsides, rare, and only where a tunnel is
-  // actually there (so they read as discovered entrances, never punched holes on flat ground).
-  MOUTH_MIN_SLOPE: 6, // surface must be at least this steep (tiles rise over the slope sample)
-  MOUTH_SCALE: 0.02, // frequency of the mouth-presence field
-  MOUTH_THRESHOLD: 0.55, // presence field must exceed this → rare
-  MOUTH_CRUST: 1, // crust drops to this at a mouth so a surfacing tunnel can break out
+  // Organic aboveground cave mouths: on steep mountainsides only, an opening is actively carved into
+  // the hillside (rounded notch that deepens toward the site centre) and connects to the caves below.
+  // Flat ground never gets one, so this is a mountainside entrance, not a random pit.
+  MOUTH_MIN_SLOPE: 5, // surface must be at least this steep (tiles rise over the ±2 slope sample)
+  MOUTH_SCALE: 0.02, // frequency of the mouth-presence field (~50-tile sites)
+  MOUTH_THRESHOLD: 0.42, // presence field must exceed this → occasional but findable
+  MOUTH_DEPTH: 13, // max tiles carved open at a mouth's centre
+  MOUTH_CRUST: 1, // crust drops to this at a mouth so the caves below break through into it
 } as const;
 
 // Phase 3: Surface landform realism — plateaus/mesas, rivers, beaches (all pure fn of world-x).

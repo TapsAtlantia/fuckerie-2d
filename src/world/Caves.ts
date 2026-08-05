@@ -58,15 +58,24 @@ export class CaveSystem {
 
   /**
    * Depth-below-surface at which caves may start carving — a solid crust so caves never break the
-   * surface as scattered pits. On steep mountainsides a rare mouth field drops the crust to ~1, so a
-   * tunnel that happens to reach up there opens as an organic cave mouth (never on flat ground).
+   * surface as scattered pits. At a cave-mouth site the crust drops to ~1 so the caves below break
+   * through into the carved opening.
    */
   caveFloor(worldX: number, slope: number): number {
-    if (slope >= CAVE.MOUTH_MIN_SLOPE) {
-      const mouth = this.noise.fbm2D(worldX * CAVE.MOUTH_SCALE + 300, 21.7, 2);
-      if (mouth > CAVE.MOUTH_THRESHOLD) return CAVE.MOUTH_CRUST;
-    }
-    return CAVE.SURFACE_CRUST;
+    return this.mouthOpening(worldX, slope) > 0 ? CAVE.MOUTH_CRUST : CAVE.SURFACE_CRUST;
+  }
+
+  /**
+   * How many tiles below the surface to actively carve open for an organic cave mouth (0 = none).
+   * Only on steep mountainsides and only at occasional sites (a presence field), deepening toward
+   * each site's centre so the opening is a rounded notch in the hillside — never a hole in flat land.
+   */
+  mouthOpening(worldX: number, slope: number): number {
+    if (slope < CAVE.MOUTH_MIN_SLOPE) return 0;
+    const f = this.noise.fbm2D(worldX * CAVE.MOUTH_SCALE + 300, 21.7, 2);
+    if (f <= CAVE.MOUTH_THRESHOLD) return 0;
+    const t = (f - CAVE.MOUTH_THRESHOLD) / (1 - CAVE.MOUTH_THRESHOLD); // 0 at edge → 1 at centre
+    return Math.round(t * CAVE.MOUTH_DEPTH);
   }
 
   private styleMul(style: CaveStyle): number {
