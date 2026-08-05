@@ -1,4 +1,4 @@
-import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER, EVIL, CAVE } from "../config";
+import { BAND, RIVER, BEACH, WATER, EVIL, CAVE } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, naturalWall, tile } from "./Tile";
@@ -136,39 +136,48 @@ export class WorldGen {
   }
 
   /** Fill a chunk's foreground + background tiles. */
+  /** Back-compat: generate a fixed 32x32 chunk at chunk-index (cx,cy). Used by dev tests. */
   generateChunk(cx: number, cy: number): Chunk {
-    const chunk = new Chunk(cx, cy);
-    const baseX = cx * CHUNK_SIZE;
-    const baseY = cy * CHUNK_SIZE;
+    return this.generateChunkAt(cx * 32, cy * 32, 32);
+  }
+
+  /**
+   * Generate a `size`x`size` chunk whose top-left is world tile (x0,y0). Tile values are a pure
+   * function of world coordinates, so the same tile has the same value regardless of chunk size.
+   */
+  generateChunkAt(x0: number, y0: number, size: number): Chunk {
+    const chunk = new Chunk(x0, y0, size);
+    const baseX = x0;
+    const baseY = y0;
 
     // Per-column caches for performance
-    const biomeCache: (Biome & { appliedModifiers?: string[] })[] = new Array(CHUNK_SIZE);
-    const surfaceHeightCache: number[] = new Array(CHUNK_SIZE);
-    const dirtDepthCache: number[] = new Array(CHUNK_SIZE);
-    const topBlockCache: TileId[] = new Array(CHUNK_SIZE);
-    const caveFloorCache: number[] = new Array(CHUNK_SIZE);
-    const mouthOpenCache: number[] = new Array(CHUNK_SIZE); // tiles carved open for a cave mouth
-    const chasmOpenCache: number[] = new Array(CHUNK_SIZE); // tiles carved open for an evil chasm
-    const waterTopCache: number[] = new Array(CHUNK_SIZE); // water-surface Y per column (Infinity = dry)
-    const beachCache: boolean[] = new Array(CHUNK_SIZE); // shore/bed column → sandy top
-    const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
+    const biomeCache: (Biome & { appliedModifiers?: string[] })[] = new Array(size);
+    const surfaceHeightCache: number[] = new Array(size);
+    const dirtDepthCache: number[] = new Array(size);
+    const topBlockCache: TileId[] = new Array(size);
+    const caveFloorCache: number[] = new Array(size);
+    const mouthOpenCache: number[] = new Array(size); // tiles carved open for a cave mouth
+    const chasmOpenCache: number[] = new Array(size); // tiles carved open for an evil chasm
+    const waterTopCache: number[] = new Array(size); // water-surface Y per column (Infinity = dry)
+    const beachCache: boolean[] = new Array(size); // shore/bed column → sandy top
+    const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(size);
 
     // Padded surface-height profile so the wide water-basin scan (and slope/beach lookups) read a
     // cached array instead of recomputing terrain noise. Covers the chunk plus SCAN_WIN + beach
     // radius on each side.
     const PAD = WATER.SCAN_WIN + BEACH.RADIUS;
-    const shPad: number[] = new Array(CHUNK_SIZE + 2 * PAD);
+    const shPad: number[] = new Array(size + 2 * PAD);
     for (let k = 0; k < shPad.length; k++) shPad[k] = this.surfaceHeight(baseX - PAD + k);
     const heightAt = (x: number): number => shPad[x - baseX + PAD];
 
     // Water surface per column, computed once for the chunk plus a beach-radius margin so beach
     // neighbour lookups are just array reads. Indexed by (relative-x + BEACH.RADIUS).
-    const waterTopExt: number[] = new Array(CHUNK_SIZE + 2 * BEACH.RADIUS);
+    const waterTopExt: number[] = new Array(size + 2 * BEACH.RADIUS);
     for (let e = 0; e < waterTopExt.length; e++) {
       waterTopExt[e] = this.waterTopAt(baseX + e - BEACH.RADIUS, heightAt);
     }
 
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const worldX = baseX + lx;
       let biome = this.biomeSystem.surfaceBiomeAt(worldX);
 
@@ -210,7 +219,7 @@ export class WorldGen {
     // Beaches: a column is sandy if it is a lake/river bed (underwater) or a dry shore whose ground
     // sits just above a nearby water level. All reads come from the cached water profile.
     const waterTopNear = (lx: number, k: number): number => waterTopExt[lx + k + BEACH.RADIUS];
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const here = surfaceHeightCache[lx];
       let beach = waterTopCache[lx] !== Infinity; // underwater bed
       if (!beach) {
@@ -222,21 +231,21 @@ export class WorldGen {
       beachCache[lx] = beach;
     }
 
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const worldX = baseX + lx;
       const biome = biomeCache[lx];
       const surfaceY = surfaceHeightCache[lx];
       const dirtDepth = dirtDepthCache[lx];
 
-      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+      for (let ly = 0; ly < size; ly++) {
         const worldY = baseY + ly;
 
         // Sky islands (above SKY band)
         if (worldY < BAND.SKY) {
           if (this.biomeSystem.skyIslandMask(worldX, worldY)) {
             // Sky island generation
-            chunk.bg[ly * CHUNK_SIZE + lx] = TileId.SkyStone;
-            chunk.fg[ly * CHUNK_SIZE + lx] = TileId.CloudStone;
+            chunk.bg[ly * size + lx] = TileId.SkyStone;
+            chunk.fg[ly * size + lx] = TileId.CloudStone;
           }
           continue;
         }
@@ -250,7 +259,7 @@ export class WorldGen {
         // caves read as carved-out rooms with a wall behind them like Terraria).
         const belowSurface = worldY - surfaceY;
         const wallMaterial = belowSurface < dirtDepth ? biome.subSurfaceBlock : this.stoneForDepth(worldX, worldY, biome);
-        chunk.bg[ly * CHUNK_SIZE + lx] = naturalWall(wallMaterial);
+        chunk.bg[ly * size + lx] = naturalWall(wallMaterial);
 
         // Foreground material by depth and biome
         let fg: TileId;
@@ -323,23 +332,23 @@ export class WorldGen {
           }
         }
 
-        chunk.fg[ly * CHUNK_SIZE + lx] = fg;
+        chunk.fg[ly * size + lx] = fg;
       }
     }
 
     // Underground-biome vegetation: where a mud-based underground biome (jungle / glowing mushroom)
     // meets cave air, grow its grass on the exposed face and hang/stand its plant in the air. Ice,
     // desert, marble and granite biomes are just their bulk material (placed above) — no grass.
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const worldX = baseX + lx;
       const biome = biomeCache[lx];
-      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
-        const idx = ly * CHUNK_SIZE + lx;
+      for (let ly = 0; ly < size; ly++) {
+        const idx = ly * size + lx;
         if (chunk.fg[idx] !== TileId.Mud) continue; // only mud-based UG biomes grow grass here
-        const up = ly > 0 ? chunk.fg[idx - CHUNK_SIZE] : -1;
-        const down = ly < CHUNK_SIZE - 1 ? chunk.fg[idx + CHUNK_SIZE] : -1;
+        const up = ly > 0 ? chunk.fg[idx - size] : -1;
+        const down = ly < size - 1 ? chunk.fg[idx + size] : -1;
         const left = lx > 0 ? chunk.fg[idx - 1] : -1;
-        const right = lx < CHUNK_SIZE - 1 ? chunk.fg[idx + 1] : -1;
+        const right = lx < size - 1 ? chunk.fg[idx + 1] : -1;
         if (up !== TileId.Air && down !== TileId.Air && left !== TileId.Air && right !== TileId.Air) continue;
         const ub = this.biomeSystem.undergroundBiomeAt(worldX, baseY + ly, biome);
         if (!ub.grass) continue;
@@ -347,13 +356,13 @@ export class WorldGen {
         if (ub.plant === TileId.Vines && down === TileId.Air) {
           const h = hash2(worldX, baseY + ly, this.seed + 321);
           if (h < 0.5) {
-            chunk.fg[idx + CHUNK_SIZE] = TileId.Vines;
-            if (ly + 2 < CHUNK_SIZE && chunk.fg[idx + 2 * CHUNK_SIZE] === TileId.Air && h < 0.2) {
-              chunk.fg[idx + 2 * CHUNK_SIZE] = TileId.Vines;
+            chunk.fg[idx + size] = TileId.Vines;
+            if (ly + 2 < size && chunk.fg[idx + 2 * size] === TileId.Air && h < 0.2) {
+              chunk.fg[idx + 2 * size] = TileId.Vines;
             }
           }
         } else if (ub.plant === TileId.GlowMushroom && up === TileId.Air) {
-          if (hash2(worldX, baseY + ly, this.seed + 654) < 0.4) chunk.fg[idx - CHUNK_SIZE] = TileId.GlowMushroom;
+          if (hash2(worldX, baseY + ly, this.seed + 654) < 0.4) chunk.fg[idx - size] = TileId.GlowMushroom;
         }
       }
     }
@@ -361,7 +370,7 @@ export class WorldGen {
     // Liquids: STATIC + deterministic (identical for every peer — no runtime flow sim, so no
     // multiplayer desync). Water only pools in genuine surface depressions (lakes/ponds), never a
     // global flood; lava sits in occasional deep cave pockets.
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const worldX = baseX + lx;
       const here = surfaceHeightCache[lx];
 
@@ -371,17 +380,17 @@ export class WorldGen {
       if (waterTop !== Infinity && waterTop < here) {
         for (let wy = waterTop; wy < here; wy++) {
           const ly = wy - baseY;
-          if (ly < 0 || ly >= CHUNK_SIZE) continue;
-          const idx = ly * CHUNK_SIZE + lx;
+          if (ly < 0 || ly >= size) continue;
+          const idx = ly * size + lx;
           if (chunk.fg[idx] === TileId.Air && chunk.liquid[idx] === 0) chunk.liquid[idx] = makeLiquid(false, LMAX);
         }
       }
 
       // Deep lava pockets in cave air.
-      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+      for (let ly = 0; ly < size; ly++) {
         const worldY = baseY + ly;
         if (worldY < LAVA_LEVEL_Y) continue;
-        const idx = ly * CHUNK_SIZE + lx;
+        const idx = ly * size + lx;
         if (chunk.fg[idx] !== TileId.Air || chunk.liquid[idx] !== 0) continue;
         if (this.noise.fbm2D(worldX * 0.02 + 12, worldY * 0.02 - 8, 2) > 0.5) {
           chunk.liquid[idx] = makeLiquid(true, LMAX);
@@ -390,22 +399,22 @@ export class WorldGen {
     }
 
     // Per-column deco pass for surface vegetation
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let lx = 0; lx < size; lx++) {
       const worldX = baseX + lx;
       const biome = biomeCache[lx];
       const surfaceY = surfaceHeightCache[lx];
       
       // Place deco in the AIR tile directly above the surface block (surfaceY - 1).
-      if (surfaceY >= baseY && surfaceY < baseY + CHUNK_SIZE) {
+      if (surfaceY >= baseY && surfaceY < baseY + size) {
         const ly = surfaceY - baseY;
         const aboveLy = ly - 1; // the air tile above the surface
         if (
           aboveLy >= 0 &&
           biome.plants.length > 0 &&
           biome.plantDensity > 0 &&
-          chunk.fg[aboveLy * CHUNK_SIZE + lx] === TileId.Air
+          chunk.fg[aboveLy * size + lx] === TileId.Air
         ) {
-          const surfaceBlock = chunk.fg[ly * CHUNK_SIZE + lx];
+          const surfaceBlock = chunk.fg[ly * size + lx];
           const rockyTop = surfaceBlock === TileId.Gravel || tile(surfaceBlock).category === "stone";
           const h = hash2(worldX, surfaceY, this.seed + 777);
           if (!rockyTop && h < biome.plantDensity) {
@@ -414,36 +423,36 @@ export class WorldGen {
             const onSand = surfaceBlock === TileId.Sand;
             // Cactus only on sand; leafy plants not on sand.
             const ok = plant === TileId.Cactus ? onSand : !onSand;
-            if (ok) chunk.fg[aboveLy * CHUNK_SIZE + lx] = plant;
+            if (ok) chunk.fg[aboveLy * size + lx] = plant;
           }
         }
       }
     }
 
     // Trees (grow up from the surface; only overwrite air).
-    const treeOverrides = this.treeSystem.treeOverridesForChunk(cx, cy);
+    const treeOverrides = this.treeSystem.treeOverridesForChunk(baseX, baseY, size);
     for (const [idx, fg] of treeOverrides) {
       if (chunk.fg[idx] === TileId.Air) chunk.fg[idx] = fg;
     }
 
     // Apply structure overrides
-    const structureOverrides = this.structureSystem.structureOverridesForChunk(cx, cy);
+    const structureOverrides = this.structureSystem.structureOverridesForChunk(baseX, baseY, size);
     for (const [key, tiles] of structureOverrides) {
       const [lx, ly] = key.split(',').map(Number);
-      if (lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_SIZE) {
-        chunk.fg[ly * CHUNK_SIZE + lx] = tiles.fg;
-        chunk.bg[ly * CHUNK_SIZE + lx] = tiles.bg;
+      if (lx >= 0 && lx < size && ly >= 0 && ly < size) {
+        chunk.fg[ly * size + lx] = tiles.fg;
+        chunk.bg[ly * size + lx] = tiles.bg;
       }
     }
 
     // The Dungeon: a large world-anchored structure overlaid last (takes priority over terrain). Each
     // tile is a pure function of world coords, so the footprint stamps identically across chunks/peers.
-    if (this.dungeon.overlaps(baseX, baseY, baseX + CHUNK_SIZE - 1, baseY + CHUNK_SIZE - 1)) {
-      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
-        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    if (this.dungeon.overlaps(baseX, baseY, baseX + size - 1, baseY + size - 1)) {
+      for (let ly = 0; ly < size; ly++) {
+        for (let lx = 0; lx < size; lx++) {
           const t = this.dungeon.tileAt(baseX + lx, baseY + ly);
           if (t) {
-            const idx = ly * CHUNK_SIZE + lx;
+            const idx = ly * size + lx;
             chunk.fg[idx] = t.fg;
             chunk.bg[idx] = t.bg;
             chunk.liquid[idx] = 0; // dungeon interiors are dry

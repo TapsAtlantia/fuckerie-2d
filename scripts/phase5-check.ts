@@ -1,3 +1,4 @@
+import { DungeonSystem } from "../src/world/Dungeon";
 import { WorldGen } from "../src/world/WorldGen";
 import { CaveSystem } from "../src/world/Caves";
 import { BiomeSystem } from "../src/world/Biome";
@@ -37,8 +38,9 @@ check("cave density grows with depth (tunnels->caverns)", shallow<mid && mid<dee
 
 // surface openings must be legitimate: a steep cave mouth OR an evil chasm — not random flat-ground
 // holes (only rare structure doorways remain). And every carved mouth must connect into the caves.
-{const cs=new CaveSystem(5150), bs=new BiomeSystem(5150); let breach=0,illegit=0,carved=0,connected=0,cols=0; const N=8000;
- for(let i=0;i<N;i++){const x=X0+i;cols++;const sh=g.surfaceHeight(x); const slope=Math.abs(g.surfaceHeight(x+2)-g.surfaceHeight(x-2));
+{const cs=new CaveSystem(5150), bs=new BiomeSystem(5150); const dcx=new DungeonSystem(5150,(x:number)=>g.surfaceHeight(x)).centerX();
+ let breach=0,illegit=0,carved=0,connected=0,cols=0; const N=8000;
+ for(let i=0;i<N;i++){const x=X0+i; if(Math.abs(x-dcx)<=90)continue; cols++;const sh=g.surfaceHeight(x); const slope=Math.abs(g.surfaceHeight(x+2)-g.surfaceHeight(x-2));
    let b=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++)if(air(x,sh+d)){b=true;break;}
    const steep=slope>=CAVE.MOUTH_MIN_SLOPE, evil=bs.isEvil(x);
    if(b && !steep && !evil) illegit++;

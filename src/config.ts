@@ -11,9 +11,26 @@ export const VIEW_MARGIN_CHUNKS = 2;
 // Pre-generation (Phase 0.5): keep a larger ring of chunks generated ahead of the player so the
 // view+margin is always already resident — no synchronous generation (and thus no frame hitch) as
 // you walk. The ring fills gradually in the background, a bounded number of chunks per tick.
-export const PRELOAD_RADIUS_CHUNKS = 5; // chunks generated beyond the view margin
+export const PRELOAD_RADIUS_CHUNKS = 5; // (in 32-tile units) how far beyond the view margin to preload
 export const PRELOAD_MAX_PER_TICK = 8; // hard cap on background chunks generated per update tick
 export const PRELOAD_TIME_MS = 5; // …and stop early once this much time has been spent, to protect the frame
+
+// Margins expressed in TILES (chunks are now variable-sized, so chunk-count margins are ambiguous).
+export const VIEW_MARGIN_TILES = VIEW_MARGIN_CHUNKS * 32;
+export const PRELOAD_RADIUS_TILES = PRELOAD_RADIUS_CHUNKS * 32;
+
+// Adaptive chunk sizing by depth band (Phase 0.5). Tile VALUES are a pure function of world
+// coordinates, so chunk size only changes how many tiles are batched per generation — not their
+// content. Band boundaries (-256, 256) are multiples of every size so a chunk never straddles a
+// band edge. Capped at 128: a chunk generates as one synchronous unit, so 256/512 would spike the
+// main thread (~50ms) — those need Web-Worker generation, a separate later task.
+export function chunkSizeForY(y: number): number {
+  if (y < -256) return 32; // sky / floating islands (small structures, sparse)
+  return 64; // surface + underground + deep
+  // NB: 128 measured at ~20ms/chunk deep (>16ms frame budget) — the framework supports it, but going
+  // bigger needs Web-Worker generation to stay at 60fps, so we cap at 64 on the main thread for now.
+}
+export const MAX_CHUNK_SIZE = 64; // largest size chunkSizeForY returns (for margin/scan bounds)
 
 export const DEFAULT_SEED = 1337;
 

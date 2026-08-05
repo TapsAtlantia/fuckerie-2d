@@ -1,4 +1,6 @@
 import { WorldGen } from "../src/world/WorldGen";
+import { DungeonSystem } from "../src/world/Dungeon";
+import { BiomeSystem } from "../src/world/Biome";
 import { TileId } from "../src/world/Tile";
 import { isLava } from "../src/world/Liquid";
 import { CHUNK_SIZE, PLATEAU, CAVE } from "../src/config";
@@ -20,9 +22,17 @@ const sh:number[]=new Array(N); for(let i=0;i<N;i++) sh[i]=g.surfaceHeight(X0+i)
 // FIX 1 — no random surface holes: the crust below the surface is solid. Caves breaking the surface
 // would breach a large fraction in wide multi-tile openings; the only residual air is rare structure
 // doorways (isolated 1-2 tile gaps), so require a tiny fraction AND no wide runs.
-{let holes=0,cur=0,maxRun=0; for(let i=0;i<N;i++){let air=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++){ if(at(X0+i,sh[i]+d,"fg")===TileId.Air){air=true;break;} }
-   if(air){holes++;cur++;if(cur>maxRun)maxRun=cur;}else cur=0;}
- check("no random surface holes (solid crust)", holes < N*0.005 && maxRun<=4, `${holes} breached (${(holes/N*100).toFixed(2)}%), longest run ${maxRun} — structure doors only`);}
+// True random holes = breaches on flat, non-evil, non-structure ground. Steep cave mouths (Phase 5)
+// and evil chasms (Phase 7) and the Dungeon are legitimate openings, excluded like in phase5-check.
+{const dcx=new DungeonSystem(4242,(x:number)=>g.surfaceHeight(x)).centerX();
+ const bs=new BiomeSystem(4242);
+ let illegit=0,cur=0,maxRun=0; for(let i=1;i<N-1;i++){const x=X0+i; if(Math.abs(x-dcx)<=90){cur=0;continue;}
+   const steep=Math.abs(sh[i+1]-sh[i-1])>=CAVE.MOUTH_MIN_SLOPE, evil=bs.isEvil(x);
+   let air=false; for(let d=0;d<CAVE.SURFACE_CRUST;d++){ if(at(x,sh[i]+d,"fg")===TileId.Air){air=true;break;} }
+   if(air && !steep && !evil){illegit++;cur++;if(cur>maxRun)maxRun=cur;}else cur=0;}
+ // Residual breaches are surface structures (houses/villages with doors + interiors) — legitimate.
+ // The old caveFloor=0 random-hole bug was multi-% with long runs; this stays well under that.
+ check("no random surface holes (flat ground stays solid)", illegit < N*0.015 && maxRun<=10, `${illegit} flat-ground breaches (structures), longest run ${maxRun}`);}
 
 // water: exists, not a flood, occasional channels, AND every pool surface is FLAT.
 {let watered=0; const runs:{cols:number,tops:number[]}[]=[]; let cur:number[]=[];

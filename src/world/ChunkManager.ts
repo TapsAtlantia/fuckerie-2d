@@ -1,16 +1,18 @@
-import { CHUNK_SIZE, VIEW_MARGIN_CHUNKS, PRELOAD_RADIUS_CHUNKS, PRELOAD_MAX_PER_TICK, PRELOAD_TIME_MS } from "../config";
-import { Chunk, chunkKey, tileIndex } from "./Chunk";
+import {
+  chunkSizeForY,
+  VIEW_MARGIN_TILES,
+  PRELOAD_RADIUS_TILES,
+  PRELOAD_MAX_PER_TICK,
+  PRELOAD_TIME_MS,
+  MAX_CHUNK_SIZE,
+} from "../config";
+import { Chunk, chunkKey } from "./Chunk";
 import { WorldGen } from "./WorldGen";
 import { TileId, isSolid } from "./Tile";
 import type { DeltaEntry } from "../net/Protocol";
 
-// Integer floor-division / positive modulo, correct for negative coordinates (so the world
-// works identically above y=0 and below, left of x=0 and right).
 function floorDiv(a: number, b: number): number {
   return Math.floor(a / b);
-}
-function posMod(a: number, b: number): number {
-  return ((a % b) + b) % b;
 }
 
 interface TileEdit {
@@ -18,13 +20,19 @@ interface TileEdit {
   bg?: number;
 }
 
-// Owns the set of resident chunks, streams them in/out around the camera, and is the single
-// gateway for reading/writing tiles by absolute world-tile coordinates. Player edits are stored
-// as per-chunk deltas so a chunk can unload and regenerate later without losing changes
-// (in-memory in Phase 1; IndexedDB-backed in a later phase).
+// Player edits are stored by ABSOLUTE world-tile coordinate (independent of chunk size), grouped
+// into fixed blocks so applying a chunk's edits only scans nearby blocks, not every edit.
+const DELTA_BLOCK = 256;
+
+// Owns the set of resident chunks, streams them in/out around the camera, and is the single gateway
+// for reading/writing tiles by absolute world-tile coordinates. Chunks are VARIABLE-sized by depth
+// band (chunkSizeForY); a chunk is keyed by its world-tile origin. Because tile values are a pure
+// function of world coordinates, chunk size never changes tile content, only batching. Player edits
+// are stored as absolute-coordinate deltas so a chunk can unload and regenerate (at any size)
+// without losing changes.
 export class ChunkManager {
   private chunks = new Map<string, Chunk>();
-  private deltas = new Map<string, Map<number, TileEdit>>();
+  private deltas = new Map<string, Map<string, TileEdit>>(); // blockKey → ("tx,ty" → edit)
   private worldgen: WorldGen;
 
   constructor(worldgen: WorldGen) {
@@ -50,57 +58,71 @@ export class ChunkManager {
     return this.chunks.size;
   }
 
-  private ensureChunk(cx: number, cy: number): Chunk {
-    const key = chunkKey(cx, cy);
+  /** The chunk containing world tile (tileX,tileY), or undefined if not resident. */
+  private chunkFor(tileX: number, tileY: number): Chunk | undefined {
+    const size = chunkSizeForY(tileY);
+    return this.chunks.get(chunkKey(floorDiv(tileX, size) * size, floorDiv(tileY, size) * size));
+  }
+
+  private ensureChunk(x0: number, y0: number, size: number): Chunk {
+    const key = chunkKey(x0, y0);
     let chunk = this.chunks.get(key);
     if (chunk) return chunk;
-    chunk = this.worldgen.generateChunk(cx, cy);
-    const edits = this.deltas.get(key);
-    if (edits) {
-      for (const [idx, edit] of edits) {
-        if (edit.fg !== undefined) chunk.fg[idx] = edit.fg;
-        if (edit.bg !== undefined) chunk.bg[idx] = edit.bg;
-      }
-    }
+    chunk = this.worldgen.generateChunkAt(x0, y0, size);
+    this.applyDeltas(chunk);
     this.chunks.set(key, chunk);
     return chunk;
   }
 
+  /** Ensure every chunk overlapping the tile rectangle is resident (walks bands top-to-bottom). */
+  private ensureRegion(minX: number, minY: number, maxX: number, maxY: number): void {
+    let ty = minY;
+    while (ty <= maxY) {
+      const size = chunkSizeForY(ty);
+      const y0 = floorDiv(ty, size) * size;
+      let tx = minX;
+      while (tx <= maxX) {
+        const x0 = floorDiv(tx, size) * size;
+        this.ensureChunk(x0, y0, size);
+        tx = x0 + size;
+      }
+      ty = y0 + size;
+    }
+  }
+
   /**
-   * Stream chunks so everything inside the tile rectangle (+ margin) is resident and anything
-   * well outside it is dropped. Keeps memory flat no matter how far the player travels.
-   *
-   * Two tiers:
-   *  1. View + margin is ensured SYNCHRONOUSLY every tick, so a frame never renders an incomplete
-   *     chunk (this also makes teleporting instant — the destination view is built before it draws).
-   *  2. A larger preload ring is filled in the BACKGROUND, a bounded number of chunks per tick,
-   *     nearest-first — so by the time the player walks into those chunks they're already resident
-   *     and no generation happens at the view edge (no streaming hitch).
+   * Stream chunks around the view. Tier 1: the view+margin is ensured synchronously so a frame never
+   * renders an incomplete chunk (and teleport lands on a complete view). Tier 2: a larger preload
+   * ring is filled in the background, nearest-first, bounded by a count cap and a time budget, so
+   * chunks are ready before the player walks into them. Everything outside the ring is dropped.
    */
   update(minTileX: number, minTileY: number, maxTileX: number, maxTileY: number): void {
-    const minCx = floorDiv(minTileX, CHUNK_SIZE) - VIEW_MARGIN_CHUNKS;
-    const maxCx = floorDiv(maxTileX, CHUNK_SIZE) + VIEW_MARGIN_CHUNKS;
-    const minCy = floorDiv(minTileY, CHUNK_SIZE) - VIEW_MARGIN_CHUNKS;
-    const maxCy = floorDiv(maxTileY, CHUNK_SIZE) + VIEW_MARGIN_CHUNKS;
-
     // Tier 1 — must be ready to render this frame.
-    for (let cy = minCy; cy <= maxCy; cy++) {
-      for (let cx = minCx; cx <= maxCx; cx++) {
-        this.ensureChunk(cx, cy);
-      }
-    }
+    this.ensureRegion(
+      minTileX - VIEW_MARGIN_TILES, minTileY - VIEW_MARGIN_TILES,
+      maxTileX + VIEW_MARGIN_TILES, maxTileY + VIEW_MARGIN_TILES,
+    );
 
-    // Tier 2 — background pre-generation of the surrounding ring, budget-limited and nearest-first.
-    const pMinCx = minCx - PRELOAD_RADIUS_CHUNKS, pMaxCx = maxCx + PRELOAD_RADIUS_CHUNKS;
-    const pMinCy = minCy - PRELOAD_RADIUS_CHUNKS, pMaxCy = maxCy + PRELOAD_RADIUS_CHUNKS;
-    const ccx = (minCx + maxCx) / 2, ccy = (minCy + maxCy) / 2;
-    const missing: { cx: number; cy: number; d2: number }[] = [];
-    for (let cy = pMinCy; cy <= pMaxCy; cy++) {
-      for (let cx = pMinCx; cx <= pMaxCx; cx++) {
-        if (cx >= minCx && cx <= maxCx && cy >= minCy && cy <= maxCy) continue; // already ensured
-        if (this.chunks.has(chunkKey(cx, cy))) continue;
-        const dx = cx - ccx, dy = cy - ccy;
-        missing.push({ cx, cy, d2: dx * dx + dy * dy });
+    // Tier 2 — background pre-generation of the surrounding ring.
+    const pMinX = minTileX - PRELOAD_RADIUS_TILES, pMaxX = maxTileX + PRELOAD_RADIUS_TILES;
+    const pMinY = minTileY - PRELOAD_RADIUS_TILES, pMaxY = maxTileY + PRELOAD_RADIUS_TILES;
+    const cx = (minTileX + maxTileX) / 2, cy = (minTileY + maxTileY) / 2;
+    const missing: { x0: number; y0: number; size: number; d2: number }[] = [];
+    {
+      let ty = pMinY;
+      while (ty <= pMaxY) {
+        const size = chunkSizeForY(ty);
+        const y0 = floorDiv(ty, size) * size;
+        let tx = pMinX;
+        while (tx <= pMaxX) {
+          const x0 = floorDiv(tx, size) * size;
+          if (!this.chunks.has(chunkKey(x0, y0))) { // view+margin already ensured above, so skipped here
+            const dx = x0 + size / 2 - cx, dy = y0 + size / 2 - cy;
+            missing.push({ x0, y0, size, d2: dx * dx + dy * dy });
+          }
+          tx = x0 + size;
+        }
+        ty = y0 + size;
       }
     }
     if (missing.length > 0) {
@@ -108,19 +130,17 @@ export class ChunkManager {
       const t0 = performance.now();
       const cap = Math.min(PRELOAD_MAX_PER_TICK, missing.length);
       for (let i = 0; i < cap; i++) {
-        this.ensureChunk(missing[i].cx, missing[i].cy);
+        this.ensureChunk(missing[i].x0, missing[i].y0, missing[i].size);
         if (performance.now() - t0 > PRELOAD_TIME_MS) break; // don't blow the frame budget
       }
     }
 
-    // Unload chunks that drifted outside the preload window (+ pad). Deltas are retained.
-    const dropPad = 2;
+    // Unload chunks entirely outside the preload window (+ pad). Deltas are retained.
+    const pad = MAX_CHUNK_SIZE;
     for (const [key, chunk] of this.chunks) {
       if (
-        chunk.cx < pMinCx - dropPad ||
-        chunk.cx > pMaxCx + dropPad ||
-        chunk.cy < pMinCy - dropPad ||
-        chunk.cy > pMaxCy + dropPad
+        chunk.x0 + chunk.size <= pMinX - pad || chunk.x0 >= pMaxX + pad ||
+        chunk.y0 + chunk.size <= pMinY - pad || chunk.y0 >= pMaxY + pad
       ) {
         this.chunks.delete(key);
       }
@@ -130,15 +150,15 @@ export class ChunkManager {
   // --- Tile access by absolute world-tile coordinates -----------------------
 
   getFg(tileX: number, tileY: number): number {
-    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    const chunk = this.chunkFor(tileX, tileY);
     if (!chunk) return TileId.Air;
-    return chunk.fg[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))];
+    return chunk.fg[(tileY - chunk.y0) * chunk.size + (tileX - chunk.x0)];
   }
 
   getBg(tileX: number, tileY: number): number {
-    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    const chunk = this.chunkFor(tileX, tileY);
     if (!chunk) return TileId.Air;
-    return chunk.bg[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))];
+    return chunk.bg[(tileY - chunk.y0) * chunk.size + (tileX - chunk.x0)];
   }
 
   isSolid(tileX: number, tileY: number): boolean {
@@ -148,56 +168,75 @@ export class ChunkManager {
   // --- Liquids (dynamic; not persisted as deltas — re-seeded from worldgen on reload) ----------
 
   getLiquid(tileX: number, tileY: number): number {
-    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    const chunk = this.chunkFor(tileX, tileY);
     if (!chunk) return 0;
-    return chunk.liquid[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))];
+    return chunk.liquid[(tileY - chunk.y0) * chunk.size + (tileX - chunk.x0)];
   }
 
   setLiquid(tileX: number, tileY: number, v: number): void {
-    const chunk = this.chunks.get(chunkKey(floorDiv(tileX, CHUNK_SIZE), floorDiv(tileY, CHUNK_SIZE)));
+    const chunk = this.chunkFor(tileX, tileY);
     if (!chunk) return;
-    chunk.liquid[tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE))] = v;
+    chunk.liquid[(tileY - chunk.y0) * chunk.size + (tileX - chunk.x0)] = v;
   }
 
-  private recordDelta(cx: number, cy: number, idx: number, patch: TileEdit): void {
-    const key = chunkKey(cx, cy);
-    let edits = this.deltas.get(key);
-    if (!edits) {
-      edits = new Map();
-      this.deltas.set(key, edits);
+  // --- Player edits (absolute-coordinate deltas) ----------------------------
+
+  private deltaBlockKey(tileX: number, tileY: number): string {
+    return floorDiv(tileX, DELTA_BLOCK) + "," + floorDiv(tileY, DELTA_BLOCK);
+  }
+
+  private recordDelta(tileX: number, tileY: number, patch: TileEdit): void {
+    const bk = this.deltaBlockKey(tileX, tileY);
+    let block = this.deltas.get(bk);
+    if (!block) { block = new Map(); this.deltas.set(bk, block); }
+    const tk = tileX + "," + tileY;
+    const existing = block.get(tk);
+    block.set(tk, existing ? { ...existing, ...patch } : patch);
+  }
+
+  /** Overlay any stored edits that fall inside a freshly generated chunk (by absolute coords). */
+  private applyDeltas(chunk: Chunk): void {
+    const { x0, y0, size } = chunk;
+    for (let by = floorDiv(y0, DELTA_BLOCK); by <= floorDiv(y0 + size - 1, DELTA_BLOCK); by++) {
+      for (let bx = floorDiv(x0, DELTA_BLOCK); bx <= floorDiv(x0 + size - 1, DELTA_BLOCK); bx++) {
+        const block = this.deltas.get(bx + "," + by);
+        if (!block) continue;
+        for (const [tk, edit] of block) {
+          const comma = tk.indexOf(",");
+          const tx = Number(tk.slice(0, comma)), ty = Number(tk.slice(comma + 1));
+          if (tx < x0 || tx >= x0 + size || ty < y0 || ty >= y0 + size) continue;
+          const idx = (ty - y0) * size + (tx - x0);
+          if (edit.fg !== undefined) chunk.fg[idx] = edit.fg;
+          if (edit.bg !== undefined) chunk.bg[idx] = edit.bg;
+        }
+      }
     }
-    const existing = edits.get(idx);
-    edits.set(idx, existing ? { ...existing, ...patch } : patch);
   }
 
   setFg(tileX: number, tileY: number, id: TileId): void {
-    const cx = floorDiv(tileX, CHUNK_SIZE);
-    const cy = floorDiv(tileY, CHUNK_SIZE);
-    const chunk = this.ensureChunk(cx, cy);
-    const idx = tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE));
-    chunk.fg[idx] = id;
-    this.recordDelta(cx, cy, idx, { fg: id });
+    const size = chunkSizeForY(tileY);
+    const chunk = this.ensureChunk(floorDiv(tileX, size) * size, floorDiv(tileY, size) * size, size);
+    chunk.fg[(tileY - chunk.y0) * size + (tileX - chunk.x0)] = id;
+    this.recordDelta(tileX, tileY, { fg: id });
   }
 
   setBg(tileX: number, tileY: number, id: TileId): void {
-    const cx = floorDiv(tileX, CHUNK_SIZE);
-    const cy = floorDiv(tileY, CHUNK_SIZE);
-    const chunk = this.ensureChunk(cx, cy);
-    const idx = tileIndex(posMod(tileX, CHUNK_SIZE), posMod(tileY, CHUNK_SIZE));
-    chunk.bg[idx] = id;
-    this.recordDelta(cx, cy, idx, { bg: id });
+    const size = chunkSizeForY(tileY);
+    const chunk = this.ensureChunk(floorDiv(tileX, size) * size, floorDiv(tileY, size) * size, size);
+    chunk.bg[(tileY - chunk.y0) * size + (tileX - chunk.x0)] = id;
+    this.recordDelta(tileX, tileY, { bg: id });
   }
 
   // --- Delta sync (multiplayer join) ----------------------------------------
 
-  /** Serialize all player edits so a joining peer can reproduce the current world state. */
+  /** Serialize all player edits (absolute coords) so a joining peer can reproduce world state. */
   exportDeltas(): DeltaEntry[] {
     const out: DeltaEntry[] = [];
-    for (const [key, edits] of this.deltas) {
-      const comma = key.indexOf(",");
-      const cx = Number(key.slice(0, comma));
-      const cy = Number(key.slice(comma + 1));
-      for (const [i, edit] of edits) out.push({ cx, cy, i, fg: edit.fg, bg: edit.bg });
+    for (const block of this.deltas.values()) {
+      for (const [tk, edit] of block) {
+        const comma = tk.indexOf(",");
+        out.push({ tx: Number(tk.slice(0, comma)), ty: Number(tk.slice(comma + 1)), fg: edit.fg, bg: edit.bg });
+      }
     }
     return out;
   }
@@ -208,11 +247,12 @@ export class ChunkManager {
       const patch: TileEdit = {};
       if (e.fg !== undefined) patch.fg = e.fg;
       if (e.bg !== undefined) patch.bg = e.bg;
-      this.recordDelta(e.cx, e.cy, e.i, patch);
-      const chunk = this.chunks.get(chunkKey(e.cx, e.cy));
+      this.recordDelta(e.tx, e.ty, patch);
+      const chunk = this.chunkFor(e.tx, e.ty);
       if (chunk) {
-        if (patch.fg !== undefined) chunk.fg[e.i] = patch.fg;
-        if (patch.bg !== undefined) chunk.bg[e.i] = patch.bg;
+        const idx = (e.ty - chunk.y0) * chunk.size + (e.tx - chunk.x0);
+        if (patch.fg !== undefined) chunk.fg[idx] = patch.fg;
+        if (patch.bg !== undefined) chunk.bg[idx] = patch.bg;
       }
     }
   }

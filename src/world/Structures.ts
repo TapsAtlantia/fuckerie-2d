@@ -1,6 +1,6 @@
 import { hash2, type Noise } from "./Noise";
 import { TileId } from "./Tile";
-import { BAND, CHUNK_SIZE, STRUCTURE } from "../config";
+import { BAND, STRUCTURE } from "../config";
 import {
   legend,
   pickTemplate,
@@ -40,22 +40,20 @@ export class StructureSystem {
   }
 
   /** Tile overrides (fg+bg) contributed by structures overlapping this chunk. */
-  structureOverridesForChunk(chunkCx: number, chunkCy: number): Map<string, { fg: TileId; bg: TileId }> {
+  structureOverridesForChunk(cwX: number, cwY: number, size: number): Map<string, { fg: TileId; bg: TileId }> {
     const overrides = new Map<string, { fg: TileId; bg: TileId }>();
-    const cwX = chunkCx * CHUNK_SIZE;
-    const cwY = chunkCy * CHUNK_SIZE;
 
     // Templates fit within ~one cell of their origin, so scanning a 2-cell margin is ample.
     const pad = 2;
     const minCX = Math.floor(cwX / this.CELL) - pad;
-    const maxCX = Math.floor((cwX + CHUNK_SIZE) / this.CELL) + pad;
+    const maxCX = Math.floor((cwX + size) / this.CELL) + pad;
     const minCY = Math.floor(cwY / this.CELL) - pad;
-    const maxCY = Math.floor((cwY + CHUNK_SIZE) / this.CELL) + pad;
+    const maxCY = Math.floor((cwY + size) / this.CELL) + pad;
 
     for (let cellX = minCX; cellX <= maxCX; cellX++) {
       for (let cellY = minCY; cellY <= maxCY; cellY++) {
         const cell = this.cellAt(cellX, cellY);
-        if (cell.has) this.stamp(cell, cwX, cwY, overrides);
+        if (cell.has) this.stamp(cell, cwX, cwY, size, overrides);
       }
     }
     return overrides;
@@ -108,6 +106,7 @@ export class StructureSystem {
     cell: StructureCell,
     cwX: number,
     cwY: number,
+    size: number,
     overrides: Map<string, { fg: TileId; bg: TileId }>,
   ): void {
     const t = cell.template!;
@@ -122,7 +121,7 @@ export class StructureSystem {
         if (!def) continue;
         const worldX = cell.originX + col;
         const worldY = cell.originY + row;
-        if (worldX < cwX || worldX >= cwX + CHUNK_SIZE || worldY < cwY || worldY >= cwY + CHUNK_SIZE) continue;
+        if (worldX < cwX || worldX >= cwX + size || worldY < cwY || worldY >= cwY + size) continue;
         overrides.set(`${worldX - cwX},${worldY - cwY}`, { fg: def.fg, bg: def.bg });
       }
     }
@@ -134,7 +133,7 @@ export class StructureSystem {
         const worldX = cell.originX + col;
         const colGround = this.surfaceHeightFn(worldX);
         for (let wy = floorY + 1; wy <= colGround; wy++) {
-          if (worldX < cwX || worldX >= cwX + CHUNK_SIZE || wy < cwY || wy >= cwY + CHUNK_SIZE) continue;
+          if (worldX < cwX || worldX >= cwX + size || wy < cwY || wy >= cwY + size) continue;
           overrides.set(`${worldX - cwX},${wy - cwY}`, { fg: TileId.Cobblestone, bg: TileId.StoneWall });
         }
       }

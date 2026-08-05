@@ -15,6 +15,7 @@ ids append-only.
 ---
 
 ## Book I — World & Structure Generation
+- ☑ 0.5. Adaptive chunks & pre-generation — deployed; chunk **preloader** (view+margin ensured synchronously, larger ring filled in background under a time budget → no streaming hitches, instant teleport); **absolute-coordinate edit deltas** (protocol v3, size-independent → co-op/persistence safe); **variable-size chunks** (32 sky / 64 elsewhere; framework supports more but 128 = ~20ms/chunk so >64 needs Web-Worker gen — deferred). Verified via `scripts/phase05-check.ts`; full suite green.
 - ☑ 1. Tile-system foundation & 16-bit tiles (Uint16 fg/bg, tile metadata, protocolVersion) — deployed; verified via `scripts/phase1-check.ts`
 - ☑ 2. Background wall system overhaul (distinct walls + wall autotiling + natural wall gen) — deployed; 12 wall tiles, natural gen (caves keep walls, sky none), recessed edge shading, `isEnclosed` helper; verified via `scripts/phase2-check.ts`
 - ☑ 3. Surface landform realism & deterministic rivers — deployed; plateau/mesa quantization (flat tops + cliffs), pure-fn-of-x rivers (riverCarve + unified waterTopAt fill), shore beaches; relief 291t, 101 streams, 7.9% wet (no flood); verified via `scripts/phase3-check.ts`

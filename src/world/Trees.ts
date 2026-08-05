@@ -1,5 +1,4 @@
 import { hash2 } from "./Noise";
-import { CHUNK_SIZE } from "../config";
 import { TileId } from "./Tile";
 import type { Biome } from "./Biome";
 
@@ -21,14 +20,12 @@ export class TreeSystem {
     this.biomeAt = biomeAt;
   }
 
-  /** Map of local tile index (ly*CHUNK_SIZE + lx) → foreground tile for tree parts in this chunk. */
-  treeOverridesForChunk(cx: number, cy: number): Map<number, TileId> {
+  /** Map of local tile index (ly*size + lx) → foreground tile for tree parts in this chunk. */
+  treeOverridesForChunk(baseX: number, baseY: number, size: number): Map<number, TileId> {
     const out = new Map<number, TileId>();
-    const baseX = cx * CHUNK_SIZE;
-    const baseY = cy * CHUNK_SIZE;
 
     const minCell = Math.floor((baseX - 6) / SPACING);
-    const maxCell = Math.floor((baseX + CHUNK_SIZE + 6) / SPACING);
+    const maxCell = Math.floor((baseX + size + 6) / SPACING);
     for (let cell = minCell; cell <= maxCell; cell++) {
       const tx = cell * SPACING + Math.floor(hash2(cell, 0, this.seed + 3) * SPACING);
       const biome = this.biomeAt(tx);
@@ -39,7 +36,7 @@ export class TreeSystem {
       // Only on fairly flat grassy ground (skip cliffs/steep faces).
       if (Math.abs(this.surfaceHeight(tx - 1) - sy) > 2 || Math.abs(this.surfaceHeight(tx + 1) - sy) > 2) continue;
 
-      this.stampTree(tx, sy, biome.treeType, cell, baseX, baseY, out);
+      this.stampTree(tx, sy, biome.treeType, cell, baseX, baseY, size, out);
     }
     return out;
   }
@@ -51,6 +48,7 @@ export class TreeSystem {
     cell: number,
     baseX: number,
     baseY: number,
+    size: number,
     out: Map<number, TileId>,
   ): void {
     const h = hash2(cell, 2, this.seed + 3);
@@ -63,8 +61,8 @@ export class TreeSystem {
     const put = (x: number, y: number, id: TileId) => {
       const lx = x - baseX;
       const ly = y - baseY;
-      if (lx < 0 || lx >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_SIZE) return;
-      out.set(ly * CHUNK_SIZE + lx, id);
+      if (lx < 0 || lx >= size || ly < 0 || ly >= size) return;
+      out.set(ly * size + lx, id);
     };
 
     // Trunk (from just above the ground up to the top).

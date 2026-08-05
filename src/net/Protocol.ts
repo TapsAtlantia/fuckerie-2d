@@ -2,15 +2,16 @@ import type { Profile } from "../Profile";
 
 // Bumped whenever the wire format changes (message shapes, tile-id width, delta encoding, …). Peers
 // with different versions must not connect. Bump this on any breaking net/protocol change.
-export const PROTOCOL_VERSION = 2;
+// v3: edits/deltas are addressed by ABSOLUTE world-tile coords (tx,ty) instead of chunk-local index,
+// so they're independent of chunk size (needed for the adaptive variable-size chunk system).
+export const PROTOCOL_VERSION = 3;
 
 // Wire format for peer-to-peer messages. Because world generation is deterministic, peers only
 // ever exchange a seed + tile edits + player states — never whole chunks.
 
 export interface DeltaEntry {
-  cx: number;
-  cy: number;
-  i: number; // tile index within the chunk
+  tx: number; // absolute world-tile X
+  ty: number; // absolute world-tile Y
   fg?: number;
   bg?: number;
 }
