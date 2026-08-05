@@ -94,6 +94,24 @@ export const enum TileId {
   StoneBrickWall = 66,
   BrickWall = 67,
   GlassWall = 68,
+
+  // --- Phase 4: ore & gem expansion (append-only). Alt metals pair with the originals
+  // (copper/tin, iron/lead, silver/tungsten, gold/platinum); a world region uses one of each pair. ---
+  TinOre = 69,
+  LeadOre = 70,
+  TungstenOre = 71,
+  PlatinumOre = 72,
+  Amethyst = 73,
+  Topaz = 74,
+
+  // Hardmode ore ids reserved NOW (generated later, in the Hardmode phase) so the tile-id space
+  // stays stable/append-only. Not placed by worldgen yet.
+  CobaltOre = 75,
+  PalladiumOre = 76,
+  MythrilOre = 77,
+  OrichalcumOre = 78,
+  AdamantiteOre = 79,
+  TitaniumOre = 80,
 }
 
 export type TileCategory =
@@ -239,6 +257,22 @@ export const TILE_PROPS: readonly TileProps[] = [
   { name: "stone brick wall", solid: false, hardness: 0.6, color: [66, 66, 74], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
   { name: "brick wall", solid: false, hardness: 0.6, color: [92, 46, 42], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
   { name: "glass wall", solid: false, hardness: 0.3, color: [120, 150, 180], lightEmit: 0, category: "wall", drop: null, texture: "flat" },
+
+  // Phase 4 ores (stone-base colour; the coloured fleck comes from oreFleckColor) + two more gems.
+  { name: "tin ore", solid: true, hardness: 1.3, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.TinOre, texture: "fleck" },
+  { name: "lead ore", solid: true, hardness: 1.4, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.LeadOre, texture: "fleck" },
+  { name: "tungsten ore", solid: true, hardness: 1.5, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.TungstenOre, texture: "fleck" },
+  { name: "platinum ore", solid: true, hardness: 1.6, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.PlatinumOre, texture: "fleck" },
+  { name: "amethyst", solid: true, hardness: 1.7, color: [150, 90, 200], lightEmit: 0, category: "gem", drop: TileId.Amethyst, texture: "flat" },
+  { name: "topaz", solid: true, hardness: 1.7, color: [220, 170, 60], lightEmit: 0, category: "gem", drop: TileId.Topaz, texture: "flat" },
+
+  // Hardmode ores (reserved; render like ores if ever placed). Higher hardness (need better tools).
+  { name: "cobalt ore", solid: true, hardness: 2.2, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.CobaltOre, texture: "fleck" },
+  { name: "palladium ore", solid: true, hardness: 2.3, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.PalladiumOre, texture: "fleck" },
+  { name: "mythril ore", solid: true, hardness: 2.5, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.MythrilOre, texture: "fleck" },
+  { name: "orichalcum ore", solid: true, hardness: 2.6, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.OrichalcumOre, texture: "fleck" },
+  { name: "adamantite ore", solid: true, hardness: 2.8, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.AdamantiteOre, texture: "fleck" },
+  { name: "titanium ore", solid: true, hardness: 3.0, color: [116, 116, 128], lightEmit: 0, category: "ore", drop: TileId.TitaniumOre, texture: "fleck" },
 ];
 
 export function tile(id: number): TileProps {
@@ -289,6 +323,16 @@ export function oreFleckColor(tileId: TileId): readonly [number, number, number]
     case TileId.IronOre: return [224, 224, 224];
     case TileId.GoldOre: return [255, 215, 0];
     case TileId.SilverOre: return [220, 220, 230];
+    case TileId.TinOre: return [170, 158, 128];
+    case TileId.LeadOre: return [96, 100, 120];
+    case TileId.TungstenOre: return [196, 205, 196];
+    case TileId.PlatinumOre: return [226, 232, 244];
+    case TileId.CobaltOre: return [46, 96, 196];
+    case TileId.PalladiumOre: return [206, 120, 74];
+    case TileId.MythrilOre: return [70, 180, 146];
+    case TileId.OrichalcumOre: return [206, 116, 196];
+    case TileId.AdamantiteOre: return [204, 72, 96];
+    case TileId.TitaniumOre: return [150, 152, 168];
     default: return null;
   }
 }

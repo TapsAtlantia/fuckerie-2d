@@ -18,7 +18,7 @@ ids append-only.
 - ☑ 1. Tile-system foundation & 16-bit tiles (Uint16 fg/bg, tile metadata, protocolVersion) — deployed; verified via `scripts/phase1-check.ts`
 - ☑ 2. Background wall system overhaul (distinct walls + wall autotiling + natural wall gen) — deployed; 12 wall tiles, natural gen (caves keep walls, sky none), recessed edge shading, `isEnclosed` helper; verified via `scripts/phase2-check.ts`
 - ☑ 3. Surface landform realism & deterministic rivers — deployed; plateau/mesa quantization (flat tops + cliffs), pure-fn-of-x rivers (riverCarve + unified waterTopAt fill), shore beaches; relief 291t, 101 streams, 7.9% wet (no flood); verified via `scripts/phase3-check.ts`
-- ☐ 4. Ore & vein rework (tiered, depth-gated, hardmode ids reserved)
+- ☑ 4. Ore & vein rework (tiered, depth-gated, hardmode ids reserved) — deployed; copper/tin→iron/lead→silver/tungsten→gold/platinum depth tiers, region alt-metals, coal + 6 gems in deep pockets, coherent lobed vein blobs (~17t), 6 hardmode ore ids reserved; verified via `scripts/phase4-check.ts`
 - ☐ 5. Cave-system deep rework (spaghetti + cheese + caverns)
 - ☐ 6. Underground biomes (jungle/ice/desert/marble/granite/glowing-mushroom)
 - ☐ 7. Evil biomes: Corruption & Crimson (+ reserve Hallow)

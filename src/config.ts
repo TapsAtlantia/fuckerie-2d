@@ -98,10 +98,15 @@ export const WATER = {
   LAKE_FIELD_THRESHOLD: 0.25, // natural (non-river) dips also need this lake field to be wet
 } as const;
 
-// Phase 2: Ore parameters ---------------------------------------------------
+// Ore parameters (Phase 4 rework) -------------------------------------------
 export const ORE = {
-  LATTICE_SIZE: 16, // tiles between vein centers
-  BASE_ABUNDANCE_MULTIPLIER: 1.0, // global ore abundance multiplier
+  LATTICE_SIZE: 14, // tiles between candidate vein centres
+  VEIN_DENSITY: 0.2, // fraction of lattice cells that host a metal/coal vein (near surface)
+  DEPTH_RICHNESS: 0.6, // extra vein density by the cavern layer (deep areas are richer)
+  GEM_DENSITY: 0.05, // fraction of deep cells that host a gem pocket
+  VEIN_SIZE: 3.0, // base vein blob radius (tiles); per-ore multipliers in Ores.ts
+  BLOB_JITTER: 0.5, // irregularity of vein blob edges (0 = round, 1 = very ragged)
+  ALT_METAL_REGION: 6000, // tiles: size of a region that uses tin/lead/tungsten/platinum vs the originals
 } as const;
 
 // Phase 2: Structure parameters ---------------------------------------------

@@ -3,155 +3,147 @@ import { TileId } from "./Tile";
 import { BAND, ORE } from "../config";
 import type { Biome } from "./Biome";
 
-interface OreType {
+// Phase 4 — tiered, depth-gated ore & gem generation.
+//
+// A real progression: copper/tin shallow → iron/lead → silver/tungsten → gold/platinum deep, coal
+// throughout, and gems in deep "gem pockets". Metals come in pairs (like Terraria's alt ores); a
+// world region deterministically uses one of each pair. Ores form clustered, irregular vein blobs
+// (not single specks), placed on a coarse lattice. Deep areas are richer. Pure function of
+// (seed, x, y, biome) → seamless across chunk borders, identical for every peer.
+
+interface MetalEntry {
+  name: string; // matches Biome.oreWeighting keys
+  primary: TileId;
+  alt: TileId; // used in "alt-metal" regions; === primary for coal (no alt)
+  minDepth: number;
+  maxDepth: number;
+  weight: number; // selection weight (also the rough relative abundance)
+  vein: number; // vein blob radius multiplier
+}
+
+interface GemEntry {
+  name: string;
   id: TileId;
   minDepth: number;
   maxDepth: number;
-  baseAbundance: number;
+  weight: number;
 }
 
-/**
- * Ore generation using deterministic vein placement on a coarse lattice.
- * Pure function of (seed, x, y, biome) - seamless across chunk borders.
- */
 export class OreSystem {
   private seed: number;
-  
-  // Lattice spacing for vein centers (tiles)
-  private readonly LATTICE_SIZE = ORE.LATTICE_SIZE;
-  
-  // Ore type definitions with depth ranges and base abundances
-  private readonly ORE_TYPES: OreType[] = [
-    { id: TileId.CoalOre, minDepth: 5, maxDepth: 300, baseAbundance: 0.12 },
-    { id: TileId.CopperOre, minDepth: 20, maxDepth: 400, baseAbundance: 0.08 },
-    { id: TileId.IronOre, minDepth: 50, maxDepth: 600, baseAbundance: 0.10 },
-    { id: TileId.GoldOre, minDepth: 200, maxDepth: 1000, baseAbundance: 0.05 },
-    { id: TileId.SilverOre, minDepth: 300, maxDepth: 1200, baseAbundance: 0.04 },
-    { id: TileId.Ruby, minDepth: BAND.CAVERN - 100, maxDepth: BAND.UNDERWORLD, baseAbundance: 0.02 },
-    { id: TileId.Sapphire, minDepth: BAND.CAVERN - 100, maxDepth: BAND.UNDERWORLD, baseAbundance: 0.02 },
-    { id: TileId.Emerald, minDepth: BAND.CAVERN - 50, maxDepth: BAND.UNDERWORLD, baseAbundance: 0.015 },
-    { id: TileId.Diamond, minDepth: BAND.CAVERN + 100, maxDepth: BAND.UNDERWORLD, baseAbundance: 0.01 },
-    { id: TileId.Crystal, minDepth: BAND.CAVERN, maxDepth: BAND.UNDERWORLD, baseAbundance: 0.025 },
+  private readonly L = ORE.LATTICE_SIZE;
+
+  // Metal & coal tiers. Shallow tiers taper out with depth (maxDepth), deep tiers gate in (minDepth).
+  private readonly METALS: MetalEntry[] = [
+    { name: "coal", primary: TileId.CoalOre, alt: TileId.CoalOre, minDepth: 6, maxDepth: 520, weight: 1.1, vein: 1.15 },
+    { name: "copper", primary: TileId.CopperOre, alt: TileId.TinOre, minDepth: 8, maxDepth: 320, weight: 1.0, vein: 1.05 },
+    { name: "iron", primary: TileId.IronOre, alt: TileId.LeadOre, minDepth: 60, maxDepth: 640, weight: 0.85, vein: 1.0 },
+    { name: "silver", primary: TileId.SilverOre, alt: TileId.TungstenOre, minDepth: 240, maxDepth: 1200, weight: 0.6, vein: 0.92 },
+    { name: "gold", primary: TileId.GoldOre, alt: TileId.PlatinumOre, minDepth: 430, maxDepth: BAND.UNDERWORLD, weight: 0.45, vein: 0.85 },
+  ];
+
+  // Gems live in deep gem pockets; higher-value gems sit deeper.
+  private readonly GEMS: GemEntry[] = [
+    { name: "amethyst", id: TileId.Amethyst, minDepth: 120, maxDepth: BAND.UNDERWORLD, weight: 1.0 },
+    { name: "topaz", id: TileId.Topaz, minDepth: 160, maxDepth: BAND.UNDERWORLD, weight: 0.95 },
+    { name: "sapphire", id: TileId.Sapphire, minDepth: 260, maxDepth: BAND.UNDERWORLD, weight: 0.8 },
+    { name: "emerald", id: TileId.Emerald, minDepth: 320, maxDepth: BAND.UNDERWORLD, weight: 0.7 },
+    { name: "ruby", id: TileId.Ruby, minDepth: 400, maxDepth: BAND.UNDERWORLD, weight: 0.6 },
+    { name: "diamond", id: TileId.Diamond, minDepth: 520, maxDepth: BAND.UNDERWORLD, weight: 0.42 },
   ];
 
   constructor(seed: number) {
     this.seed = seed;
   }
 
-  /**
-   * Get ore tile at (x, y) if present, otherwise null.
-   * Only replaces stone blocks (not dirt, grass, etc.).
-   */
+  /** Ore/gem tile at (x, y) if present, else null. Only meaningful where the caller has stone. */
   oreAt(worldX: number, worldY: number, biome: Biome): TileId | null {
     const depth = Math.max(0, worldY);
-    
-    // Get applicable ore types for this depth
-    const applicableOres = this.ORE_TYPES.filter(
-      ore => depth >= ore.minDepth && depth <= ore.maxDepth
-    );
-    
-    if (applicableOres.length === 0) return null;
+    const latX = Math.floor(worldX / this.L);
+    const latY = Math.floor(worldY / this.L);
 
-    // Check if we're in a vein
-    const latticeX = Math.floor(worldX / this.LATTICE_SIZE);
-    const latticeY = Math.floor(worldY / this.LATTICE_SIZE);
-    
-    // Hash the lattice cell to determine vein properties
-    const cellHash = hash2(latticeX, latticeY, this.seed);
-    
-    // Only some lattice cells have veins (hash in [0,1); keep ~14% for sparse ore).
-    if (cellHash < 0.86) return null;
+    // Deeper cells are richer (more of them host a vein).
+    const richness = 1 + Math.min(1, depth / BAND.CAVERN) * ORE.DEPTH_RICHNESS;
+    const density = Math.min(0.6, ORE.VEIN_DENSITY * richness);
 
-    // Determine ore type for this vein (based on cell hash + biome weighting)
-    const oreType = this.selectOreType(applicableOres, cellHash, biome);
-    if (!oreType) return null;
+    // --- Metal / coal veins ---
+    if (hash2(latX, latY, this.seed) < density) {
+      const sel = hash2(latX * 2 + 11, latY * 2 + 3, this.seed + 101);
+      const m = this.pickMetal(depth, biome, sel);
+      if (m) {
+        const id = this.useAltMetals(worldX) ? m.alt : m.primary;
+        if (this.inBlob(worldX, worldY, latX, latY, ORE.VEIN_SIZE * m.vein, this.seed + id * 31)) {
+          return id;
+        }
+      }
+    }
 
-    // Check if this specific tile is within the vein blob
-    const veinHash = hash2(worldX, worldY, this.seed + latticeX * 7 + latticeY * 13);
-    const inVein = this.isInVein(worldX, worldY, latticeX, latticeY, veinHash);
-    
-    if (inVein) {
-      return oreType.id;
+    // --- Gem pockets (independent gate, deep) ---
+    if (hash2(latX + 7, latY + 13, this.seed + 555) < ORE.GEM_DENSITY) {
+      const gsel = hash2(latX * 5 + 2, latY * 5 + 9, this.seed + 777);
+      const g = this.pickGem(depth, gsel);
+      if (g && this.inBlob(worldX, worldY, latX, latY, ORE.VEIN_SIZE * 0.7, this.seed + g.id * 53)) {
+        return g.id;
+      }
     }
 
     return null;
   }
 
-  /** Select ore type based on depth-applicable ores, biome weighting, and random. */
-  private selectOreType(
-    applicableOres: OreType[],
-    cellHash: number,
-    biome: Biome
-  ): OreType | null {
-    // Apply biome ore weighting
-    const weighted = applicableOres.map(ore => {
-      let weight = ore.baseAbundance;
-      
-      // Apply biome-specific bonuses
-      for (const [oreName, bonus] of biome.oreWeighting) {
-        if (this.oreNameMatches(ore.id, oreName)) {
-          weight *= bonus;
-        }
-      }
-      
-      return { ore, weight };
-    });
+  /** Whether this region uses the alternate metals (tin/lead/tungsten/platinum). Coarse regions. */
+  private useAltMetals(worldX: number): boolean {
+    return hash2(Math.floor(worldX / ORE.ALT_METAL_REGION), 7, this.seed + 4242) > 0.5;
+  }
 
-    // Normalize weights
-    const totalWeight = weighted.reduce((sum, w) => sum + w.weight, 0);
-    if (totalWeight === 0) return null;
+  private pickMetal(depth: number, biome: Biome, selHash: number): MetalEntry | null {
+    const applicable = this.METALS.filter((o) => depth >= o.minDepth && depth <= o.maxDepth);
+    if (applicable.length === 0) return null;
+    const weighted = applicable.map((o) => ({ o, w: o.weight * this.biomeBias(biome, o.name) }));
+    return this.weightedPick(weighted, selHash);
+  }
 
-    // Select based on cell hash
-    let threshold = cellHash * totalWeight;
-    for (const { ore, weight } of weighted) {
-      threshold -= weight;
-      if (threshold <= 0) return ore;
+  private pickGem(depth: number, selHash: number): GemEntry | null {
+    const applicable = this.GEMS.filter((g) => depth >= g.minDepth && depth <= g.maxDepth);
+    if (applicable.length === 0) return null;
+    const weighted = applicable.map((g) => ({ o: g, w: g.weight }));
+    return this.weightedPick(weighted, selHash);
+  }
+
+  private biomeBias(biome: Biome, name: string): number {
+    let bias = 1;
+    for (const [oreName, mult] of biome.oreWeighting) {
+      if (oreName === name) bias *= mult;
     }
-
-    return weighted[0]?.ore ?? null;
+    return bias;
   }
 
-  /** Check if ore name string matches a TileId. */
-  private oreNameMatches(tileId: TileId, name: string): boolean {
-    const oreNames: Partial<Record<TileId, string>> = {
-      [TileId.CoalOre]: "coal",
-      [TileId.CopperOre]: "copper",
-      [TileId.IronOre]: "iron",
-      [TileId.GoldOre]: "gold",
-      [TileId.SilverOre]: "silver",
-      [TileId.Ruby]: "ruby",
-      [TileId.Sapphire]: "sapphire",
-      [TileId.Emerald]: "emerald",
-      [TileId.Diamond]: "diamond",
-      [TileId.Crystal]: "crystal",
-    };
-    return oreNames[tileId] === name;
+  private weightedPick<T>(weighted: { o: T; w: number }[], selHash: number): T | null {
+    const total = weighted.reduce((s, x) => s + x.w, 0);
+    if (total <= 0) return null;
+    let t = selHash * total;
+    for (const { o, w } of weighted) {
+      t -= w;
+      if (t <= 0) return o;
+    }
+    return weighted[weighted.length - 1]?.o ?? null;
   }
 
-  /** Determine if a tile is within a vein blob using noise-based distance from vein center. */
-  private isInVein(
-    worldX: number,
-    worldY: number,
-    latticeX: number,
-    latticeY: number,
-    veinHash: number
-  ): boolean {
-    // Vein center offset within the lattice cell
-    const centerX = latticeX * this.LATTICE_SIZE + (veinHash * this.LATTICE_SIZE * 0.3 + this.LATTICE_SIZE * 0.35);
-    const centerY = latticeY * this.LATTICE_SIZE + ((veinHash * 17 % 1) * this.LATTICE_SIZE * 0.3 + this.LATTICE_SIZE * 0.35);
-    
-    // Distance from vein center
-    const dx = worldX - centerX;
-    const dy = worldY - centerY;
+  /** Irregular vein blob centred (jittered) in the lattice cell — clustered, not a single speck. */
+  private inBlob(worldX: number, worldY: number, latX: number, latY: number, radius: number, salt: number): boolean {
+    const h = hash2(latX, latY, salt);
+    const h2 = hash2(latX + 3, latY + 5, salt);
+    const cx = latX * this.L + this.L * (0.3 + h * 0.4);
+    const cy = latY * this.L + this.L * (0.3 + h2 * 0.4);
+    const dx = worldX - cx;
+    const dy = worldY - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    // Small vein radius so ore stays a few % of stone (not a rainbow).
-    const maxRadius = 1.1 + veinHash * 1.6; // ~1.1-2.7 tiles
-
-    // Noise-jittered shape (not a perfect circle)
-    const shapeNoise = hash2(Math.floor(worldX), Math.floor(worldY), this.seed + 999);
-    const radius = maxRadius * (0.65 + shapeNoise * 0.45);
-
-    return dist < radius;
+    const r = radius * (0.75 + h * 0.5); // per-cell size variation
+    // Coherent lobed edge: the radius varies smoothly with angle (organic "potato" outline) so the
+    // blob is irregular like a real vein but always a single connected clump — no isolated specks.
+    const ang = Math.atan2(dy, dx);
+    const lobe =
+      Math.sin(ang * 3 + h * 6.283) * ORE.BLOB_JITTER * 0.5 +
+      Math.sin(ang * 5 + h2 * 6.283) * ORE.BLOB_JITTER * 0.3;
+    return dist < r * (1 + lobe);
   }
 }
