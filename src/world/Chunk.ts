@@ -24,14 +24,21 @@ export class Chunk {
   readonly bg: Uint16Array; // background wall tile ids
   readonly liquid: Uint8Array; // liquid state (see Liquid.ts encoding)
 
-  constructor(x0: number, y0: number, size: number) {
+  constructor(x0: number, y0: number, size: number, buffers?: { fg: ArrayBuffer; bg: ArrayBuffer; liquid: ArrayBuffer }) {
     this.x0 = x0;
     this.y0 = y0;
     this.size = size;
-    const area = size * size;
-    this.fg = new Uint16Array(area); // defaults to Air (0)
-    this.bg = new Uint16Array(area);
-    this.liquid = new Uint8Array(area);
+    if (buffers) {
+      // Adopt buffers transferred from the generation worker (zero-copy).
+      this.fg = new Uint16Array(buffers.fg);
+      this.bg = new Uint16Array(buffers.bg);
+      this.liquid = new Uint8Array(buffers.liquid);
+    } else {
+      const area = size * size;
+      this.fg = new Uint16Array(area); // defaults to Air (0)
+      this.bg = new Uint16Array(area);
+      this.liquid = new Uint8Array(area);
+    }
   }
 
   /** Chunk-index compatibility (used only where a fixed grid is assumed, e.g. dev tests). */
