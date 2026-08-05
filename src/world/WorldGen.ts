@@ -1,4 +1,4 @@
-import { BAND, CHUNK_SIZE, RIVER, BEACH } from "../config";
+import { BAND, CHUNK_SIZE, RIVER, BEACH, WATER } from "../config";
 import { Noise, hash2, LayeredNoiseSystem } from "./Noise";
 import { Chunk } from "./Chunk";
 import { TileId, naturalWall, tile } from "./Tile";
@@ -56,11 +56,6 @@ export class WorldGen {
     return Math.floor(-elev) + this.riverCarve(worldX, elev);
   }
 
-  /** The un-carved land height (river banks) at a column — used as the river's water-surface level. */
-  private bankHeight(worldX: number): number {
-    return Math.floor(-this.layeredNoise.surfaceElevation(worldX));
-  }
-
   /**
    * How many tiles a deterministic river carves down at column x (0 = none). Rivers are occasional
    * (gated by a low-frequency presence field), meander via a mid-frequency path field, and only cut
@@ -79,27 +74,51 @@ export class WorldGen {
   }
 
   /**
-   * The world-Y of the water surface at column x (rivers + depression lakes), or +Infinity if the
-   * column holds no standing water. One source of truth for both the liquid fill and beach placement.
+   * The world-Y of the water surface at column x, or +Infinity if the column holds no standing
+   * water. ALL water — depression lakes and carved river channels alike — is a FLAT pool sitting at
+   * its basin's spill level, never water clinging to a slope. Uses the classic "trapping water"
+   * rule over the surface profile: scan out to WATER.SCAN_WIN each side for the containing rim; the
+   * pool level is the LOWER of the two rims, and the column only holds water if its floor is at
+   * least MIN_DEPTH below that rim. A river channel running down a slope has no uphill+downhill rim
+   * pair, so it correctly stays a dry ravine instead of holding diagonal water.
+   *
+   * `heightAt` supplies the surface height (a cached array during chunk gen, so the wide scan costs
+   * no extra noise) and keeps the whole thing a pure function of x.
    */
-  private waterTopAt(worldX: number): number {
-    const elev = this.layeredNoise.surfaceElevation(worldX);
-    const bank = Math.floor(-elev);
-    const carve = this.riverCarve(worldX, elev);
-    if (carve > 1) return bank + 1; // river: water sits just below the banks
+  private waterTopAt(worldX: number, heightAt: (x: number) => number): number {
+    const here = heightAt(worldX);
 
-    // Depression lake: this column is a basin only if both sides are meaningfully higher ground,
-    // gated by a low-frequency lake field so most dips stay dry.
-    const here = bank + carve;
-    const W = 16;
-    const rimL = this.surfaceHeight(worldX - W);
-    const rimR = this.surfaceHeight(worldX + W);
-    if (here > rimL + 3 && here > rimR + 3 && this.noise.fbm2D(worldX * 0.0025 + 88, 3.1, 2) > 0.1) {
-      let level = Math.max(rimL, rimR) + 1; // water surface just below the lower spill rim
-      if (here - level > 24) level = here - 24; // cap lake depth
-      return level;
+    // Walk each direction to the first enclosing ridge CREST (highest ground, i.e. smallest Y, before
+    // the terrain crests and descends the far side). A crest is a fixed terrain feature, so every
+    // column in the basin between the same two crests computes the identical spill level → the pool
+    // surface is perfectly FLAT (unlike a sliding window-min, which drifts along sloped banks).
+    const ridge = (dir: number): { y: number; crested: boolean } => {
+      let rim = here; // highest ground seen (min Y)
+      let crested = false;
+      for (let d = 1; d <= WATER.SCAN_WIN; d++) {
+        const h = heightAt(worldX + dir * d);
+        if (h < rim) rim = h; // higher ground → raise the rim
+        else if (h > rim + 2) { crested = true; break; } // descended past the crest → real rim
+      }
+      return { y: rim, crested };
+    };
+    const L = ridge(-1), R = ridge(1);
+    const spill = L.y >= R.y ? L : R; // water escapes over the LOWER crest (the larger Y)
+    // The limiting side must be a genuine crest within range: a broad open basin (rim beyond the
+    // scan window) is rejected as dry rather than filled with drifting, non-flat water.
+    if (!spill.crested || here - spill.y < WATER.MIN_DEPTH) return Infinity;
+    const spillY = spill.y;
+
+    // A carved river channel that actually pools counts as water; otherwise require the lake field so
+    // most ordinary dips stay dry (no global ponding).
+    const isRiver = this.riverCarve(worldX, this.layeredNoise.surfaceElevation(worldX)) > 1;
+    if (!isRiver && this.noise.fbm2D(worldX * 0.0025 + 88, 3.1, 2) <= WATER.LAKE_FIELD_THRESHOLD) {
+      return Infinity;
     }
-    return Infinity;
+
+    let level = spillY; // flush with the shoreline
+    if (here - level > WATER.MAX_DEPTH) level = here - WATER.MAX_DEPTH;
+    return level;
   }
 
   /** Get the appropriate stone variant for a given depth and position. */
@@ -127,6 +146,21 @@ export class WorldGen {
     const beachCache: boolean[] = new Array(CHUNK_SIZE); // shore/bed column → sandy top
     const microBiomeCache: (ReturnType<typeof this.microBiomeSystem.checkForMicroBiome> | null)[] = new Array(CHUNK_SIZE);
 
+    // Padded surface-height profile so the wide water-basin scan (and slope/beach lookups) read a
+    // cached array instead of recomputing terrain noise. Covers the chunk plus SCAN_WIN + beach
+    // radius on each side.
+    const PAD = WATER.SCAN_WIN + BEACH.RADIUS;
+    const shPad: number[] = new Array(CHUNK_SIZE + 2 * PAD);
+    for (let k = 0; k < shPad.length; k++) shPad[k] = this.surfaceHeight(baseX - PAD + k);
+    const heightAt = (x: number): number => shPad[x - baseX + PAD];
+
+    // Water surface per column, computed once for the chunk plus a beach-radius margin so beach
+    // neighbour lookups are just array reads. Indexed by (relative-x + BEACH.RADIUS).
+    const waterTopExt: number[] = new Array(CHUNK_SIZE + 2 * BEACH.RADIUS);
+    for (let e = 0; e < waterTopExt.length; e++) {
+      waterTopExt[e] = this.waterTopAt(baseX + e - BEACH.RADIUS, heightAt);
+    }
+
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const worldX = baseX + lx;
       let biome = this.biomeSystem.surfaceBiomeAt(worldX);
@@ -135,11 +169,11 @@ export class WorldGen {
       biome = this.biomeModifierSystem.applyModifiers(biome, worldX, baseY, baseY);
 
       biomeCache[lx] = biome;
-      surfaceHeightCache[lx] = this.surfaceHeight(worldX);
+      surfaceHeightCache[lx] = shPad[lx + PAD];
 
       // Realistic stratigraphy: topsoil thins on steep slopes (erosion), and very steep faces
       // expose rock/gravel (talus) instead of the biome's soft top block.
-      const slope = Math.abs(this.surfaceHeight(worldX + 2) - this.surfaceHeight(worldX - 2));
+      const slope = Math.abs(shPad[lx + PAD + 2] - shPad[lx + PAD - 2]);
       const jitter = Math.floor((this.noise.noise2D(worldX * 0.1, 7.7) + 1) * 2);
       dirtDepthCache[lx] = Math.max(1, biome.subSurfaceDepth + jitter - Math.floor(slope / 2.5));
       if (slope >= 10) topBlockCache[lx] = biome.stoneVariant;
@@ -147,19 +181,15 @@ export class WorldGen {
       else topBlockCache[lx] = biome.topBlock;
 
       caveFloorCache[lx] = this.caveSystem.caveFloor(worldX);
-      waterTopCache[lx] = this.waterTopAt(worldX);
+      waterTopCache[lx] = waterTopExt[lx + BEACH.RADIUS];
 
       // Check for micro-biomes (coarse check per column)
       microBiomeCache[lx] = null; // Will be checked per-tile for precision
     }
 
     // Beaches: a column is sandy if it is a lake/river bed (underwater) or a dry shore whose ground
-    // sits just above a nearby water level. Uses the per-column water cache (with direct lookups for
-    // the few neighbours beyond the chunk edge), so it stays a pure function of x.
-    const waterTopNear = (lx: number, k: number): number => {
-      const j = lx + k;
-      return j >= 0 && j < CHUNK_SIZE ? waterTopCache[j] : this.waterTopAt(baseX + j);
-    };
+    // sits just above a nearby water level. All reads come from the cached water profile.
+    const waterTopNear = (lx: number, k: number): number => waterTopExt[lx + k + BEACH.RADIUS];
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const here = surfaceHeightCache[lx];
       let beach = waterTopCache[lx] !== Infinity; // underwater bed

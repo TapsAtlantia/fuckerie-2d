@@ -39,14 +39,13 @@ export class CaveSystem {
   }
 
   /**
-   * Depth-below-surface at which caves may carve for this column. Normally a few tiles (solid
-   * crust). In occasional "entrance" regions it drops to 0 so a cave that reaches the surface
-   * breaks through as an organic mouth (still only where a tunnel/room is actually there — never a
-   * punched hole). Used with a `>=` gate in WorldGen.
+   * Depth-below-surface at which caves may start carving for this column — a guaranteed solid crust
+   * so caves never break the surface as scattered pits. Caves stay shallow (reachable a few tiles
+   * down) but the ground reads as intact. (Organic aboveground cave mouths on steep mountainsides
+   * come back in the Phase 5 cave rework, gated properly so they're rare and discovered.)
    */
-  caveFloor(worldX: number): number {
-    const e = this.noise.fbm2D(worldX * 0.006 + 300, 17.3, 2);
-    return e > 0.5 ? 0 : 3;
+  caveFloor(_worldX: number): number {
+    return CAVE.SURFACE_CRUST;
   }
 
   private styleMul(style: CaveStyle): number {

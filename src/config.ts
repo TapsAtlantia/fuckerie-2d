@@ -64,6 +64,8 @@ export const CAVE = {
   REGION_THRESHOLD: 0.0, // regionMask (~[-1,1]) must exceed this → ~half the world has cave systems
   BASE_SCALE: 0.045, // scale of domain-warped tunnel noise
   WARP_SCALE: 0.02, // scale of domain warping
+  SURFACE_CRUST: 6, // guaranteed solid tiles between the surface and any cave (no surface holes;
+  // caves stay shallow/reachable but never break the surface as random pits)
 } as const;
 
 // Phase 3: Surface landform realism — plateaus/mesas, rivers, beaches (all pure fn of world-x).
@@ -76,7 +78,7 @@ export const PLATEAU = {
 
 export const RIVER = {
   PRESENCE_SCALE: 0.0006, // frequency of the "does a river exist here" field
-  PRESENCE_THRESHOLD: 0.33, // above this → river region (occasional, not everywhere)
+  PRESENCE_THRESHOLD: 0.45, // above this → river region (occasional, not everywhere)
   MEANDER_SCALE: 0.004, // frequency of the meandering channel path
   WIDTH: 0.12, // |meander| below this is inside the channel band
   DEPTH: 11, // max tiles the channel carves down at its center
@@ -87,6 +89,13 @@ export const BEACH = {
   RADIUS: 3, // how many columns out to look for adjacent water
   BAND: 4, // dry ground within this many tiles above a nearby water level becomes sand
   BED_DEPTH: 3, // sand depth for shores/beds
+} as const;
+
+export const WATER = {
+  SCAN_WIN: 18, // tiles scanned each side for a basin's containing rim; keeps pools narrow & FLAT
+  MIN_DEPTH: 4, // a basin must be at least this deep below its spill rim to hold standing water
+  MAX_DEPTH: 20, // cap pool depth so narrow chasms don't fill into deep water columns
+  LAKE_FIELD_THRESHOLD: 0.25, // natural (non-river) dips also need this lake field to be wet
 } as const;
 
 // Phase 2: Ore parameters ---------------------------------------------------
