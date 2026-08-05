@@ -180,7 +180,7 @@ export class WorldGen {
       else if (slope >= 6) topBlockCache[lx] = TileId.Gravel;
       else topBlockCache[lx] = biome.topBlock;
 
-      caveFloorCache[lx] = this.caveSystem.caveFloor(worldX);
+      caveFloorCache[lx] = this.caveSystem.caveFloor(worldX, slope);
       waterTopCache[lx] = waterTopExt[lx + BEACH.RADIUS];
 
       // Check for micro-biomes (coarse check per column)

@@ -59,13 +59,35 @@ export const BIOME = {
 
 // Phase 2: Cave parameters --------------------------------------------------
 export const CAVE = {
-  REGION_SCALE: 0.0035, // scale of cave-region mask: ~285-tile 2D pockets (varies with depth too,
-  // so caves appear at shallow depths — not gated into huge vertical dead-zones)
-  REGION_THRESHOLD: 0.0, // regionMask (~[-1,1]) must exceed this → ~half the world has cave systems
+  REGION_SCALE: 0.0035, // scale of cave-region mask: ~285-tile 2D pockets that cluster shallow caves
+  REGION_THRESHOLD: 0.2, // regionMask (~[-1,1]) must exceed this near the surface → caves cluster
+  // into systems with solid rock between (surface reads mostly solid)
+  REGION_DEPTH_RELAX: 0.9, // region gate relaxes with depth → the deep is caves-everywhere
   BASE_SCALE: 0.045, // scale of domain-warped tunnel noise
   WARP_SCALE: 0.02, // scale of domain warping
-  SURFACE_CRUST: 6, // guaranteed solid tiles between the surface and any cave (no surface holes;
-  // caves stay shallow/reachable but never break the surface as random pits)
+
+  // Spaghetti: thin, winding worm tunnels (the connective tissue), kept walkable but sparse; they
+  // widen with depth to stitch the deep caverns into one network.
+  SPAGHETTI_WIDTH: 0.055, // base half-width
+  SPAGHETTI_DEPTH_GAIN: 0.05, // tunnels widen with depth
+
+  // Cheese: big open caverns — a low-frequency blob field whose threshold falls with depth, so rooms
+  // grow larger and more common the deeper you go (huge in the deep). Fewer/bigger rooms threaded by
+  // tunnels read better than many small blobs.
+  CHEESE_SCALE: 0.008, // cavern field scale (lower = bigger, fewer, better-connected rooms)
+  CHEESE_THRESHOLD: 0.7, // near-surface: high → caverns rare up top
+  CHEESE_DEPTH_GAIN: 0.3, // threshold drop by the cavern layer (BAND.CAVERN)
+  CHEESE_DEEP_GAIN: 0.14, // further drop in the deep below the cavern layer
+  CHEESE_MIN_THRESHOLD: 0.3, // never fully hollow — keep rock between the deep caverns
+
+  SURFACE_CRUST: 6, // solid tiles above any cave on normal ground (no random surface pits)
+
+  // Organic aboveground cave mouths: only on steep mountainsides, rare, and only where a tunnel is
+  // actually there (so they read as discovered entrances, never punched holes on flat ground).
+  MOUTH_MIN_SLOPE: 6, // surface must be at least this steep (tiles rise over the slope sample)
+  MOUTH_SCALE: 0.02, // frequency of the mouth-presence field
+  MOUTH_THRESHOLD: 0.55, // presence field must exceed this → rare
+  MOUTH_CRUST: 1, // crust drops to this at a mouth so a surfacing tunnel can break out
 } as const;
 
 // Phase 3: Surface landform realism — plateaus/mesas, rivers, beaches (all pure fn of world-x).

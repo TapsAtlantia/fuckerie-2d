@@ -1,12 +1,16 @@
 import { Noise } from "./Noise";
 import type { CaveStyle } from "./Biome";
-import { CAVE } from "../config";
+import { BAND, CAVE } from "../config";
 
 /**
- * Cave generation: wide winding tunnels (domain-warped worm noise) that connect open caverns
- * (low-frequency blob rooms, bigger with depth), clustered into systems by a region mask.
- * Pure function of (seed, x, y, style) — deterministic and seamless across chunk borders.
- * Tuned to read as real, walk-in cave systems rather than scattered missing blocks.
+ * Phase 5 — Terraria-grade cave networks. Two combined carve fields:
+ *   • "spaghetti" — thin, winding, domain-warped worm tunnels (two decorrelated networks so caves
+ *     branch and loop); the connective tissue present at every depth.
+ *   • "cheese" — big open caverns from a low-frequency blob field whose threshold falls with depth,
+ *     so descending goes tunnels → rooms → huge caverns.
+ * A region mask keeps the shallow surface mostly solid and clusters caves into systems; it relaxes
+ * with depth until the deep is caves-everywhere. Pure function of (seed, x, y, style) — deterministic
+ * and seamless. Background walls behind carved caves are preserved by WorldGen (Phase 2).
  */
 export class CaveSystem {
   private noise: Noise;
@@ -18,33 +22,50 @@ export class CaveSystem {
   }
 
   caveAt(worldX: number, worldY: number, style: CaveStyle): boolean {
-    // Cluster caves into systems so there are solid stretches between them (not a uniform sponge).
-    if (this.regionMask(worldX, worldY) < CAVE.REGION_THRESHOLD) return false;
-
     const depth = Math.max(0, worldY);
-    const dt = Math.min(1, depth / 900); // 0 shallow → 1 deep
+    const dt = Math.min(1, depth / BAND.CAVERN); // 0 surface → 1 at the cavern layer
+    const deep = Math.min(1, Math.max(0, (depth - BAND.CAVERN) / 2400)); // extra deepness below that
     const sm = this.styleMul(style);
 
-    // Winding tunnels — the connective tissue. Two decorrelated networks so caves branch and loop.
-    const tw = (0.11 + 0.05 * dt) * sm;
-    if (Math.abs(this.warp(worldX, worldY, 0)) < tw) return true;
-    if (Math.abs(this.warp(worldX, worldY, 137)) < tw * 0.82) return true;
+    // Region gate: clusters shallow caves (solid stretches between systems). Relaxes with depth so
+    // low areas are continuously cavey rather than isolated pockets.
+    // Relax quadratically so the near-surface stays gated/solid while the deep opens up fully.
+    const inRegion =
+      this.regionMask(worldX, worldY) >=
+      CAVE.REGION_THRESHOLD - dt * dt * CAVE.REGION_DEPTH_RELAX - deep * 0.6;
 
-    // Open caverns — low-frequency blob rooms, larger and more common with depth.
-    const room = this.noise.fbm2D(worldX * 0.018 + 500, worldY * 0.018 - 500, 3);
-    const roomThresh = (0.52 - 0.34 * dt) / sm;
-    if (room > roomThresh) return true;
+    // Spaghetti tunnels — thin worms, only where a cave region exists (so they don't riddle the
+    // whole surface). Two networks for branching/looping.
+    if (inRegion) {
+      const tw = (CAVE.SPAGHETTI_WIDTH + CAVE.SPAGHETTI_DEPTH_GAIN * dt) * sm;
+      if (Math.abs(this.warp(worldX, worldY, 0)) < tw) return true;
+      if (Math.abs(this.warp(worldX, worldY, 137)) < tw * 0.8) return true;
+    }
+
+    // Cheese caverns — big rooms; threshold falls with depth (grow & become common), floored so the
+    // deep never goes fully hollow. Allowed anywhere once we're past the shallow band.
+    if (inRegion || dt > 0.6) {
+      const room = this.noise.fbm2D(worldX * CAVE.CHEESE_SCALE + 500, worldY * CAVE.CHEESE_SCALE - 500, 2);
+      const roomThresh = Math.max(
+        CAVE.CHEESE_MIN_THRESHOLD,
+        (CAVE.CHEESE_THRESHOLD - CAVE.CHEESE_DEPTH_GAIN * dt - CAVE.CHEESE_DEEP_GAIN * deep) / sm,
+      );
+      if (room > roomThresh) return true;
+    }
 
     return false;
   }
 
   /**
-   * Depth-below-surface at which caves may start carving for this column — a guaranteed solid crust
-   * so caves never break the surface as scattered pits. Caves stay shallow (reachable a few tiles
-   * down) but the ground reads as intact. (Organic aboveground cave mouths on steep mountainsides
-   * come back in the Phase 5 cave rework, gated properly so they're rare and discovered.)
+   * Depth-below-surface at which caves may start carving — a solid crust so caves never break the
+   * surface as scattered pits. On steep mountainsides a rare mouth field drops the crust to ~1, so a
+   * tunnel that happens to reach up there opens as an organic cave mouth (never on flat ground).
    */
-  caveFloor(_worldX: number): number {
+  caveFloor(worldX: number, slope: number): number {
+    if (slope >= CAVE.MOUTH_MIN_SLOPE) {
+      const mouth = this.noise.fbm2D(worldX * CAVE.MOUTH_SCALE + 300, 21.7, 2);
+      if (mouth > CAVE.MOUTH_THRESHOLD) return CAVE.MOUTH_CRUST;
+    }
     return CAVE.SURFACE_CRUST;
   }
 
@@ -63,10 +84,14 @@ export class CaveSystem {
     return this.noise.fbm2D(worldX * CAVE.REGION_SCALE, worldY * CAVE.REGION_SCALE, 2, 2, 0.5);
   }
 
-  /** Domain-warped fBm → organic, winding tunnel bands (the value crosses zero along tunnels). */
+  /**
+   * Domain-warped fBm → organic, winding tunnel bands (the value crosses zero along tunnels). Only
+   * two octaves so the field is smooth: distinct, long, walkable tunnels with solid rock between,
+   * rather than a high-octave sponge of countless thin cracks.
+   */
   private warp(worldX: number, worldY: number, off: number): number {
-    const wx = worldX + this.noise.fbm2D(worldX * CAVE.WARP_SCALE + off, worldY * CAVE.WARP_SCALE + off, 2) * 24;
-    const wy = worldY + this.noise.fbm2D(worldX * CAVE.WARP_SCALE + off + 50, worldY * CAVE.WARP_SCALE + off + 50, 2) * 24;
-    return this.noise.fbm2D(wx * CAVE.BASE_SCALE, wy * CAVE.BASE_SCALE, 4);
+    const wx = worldX + this.noise.fbm2D(worldX * CAVE.WARP_SCALE + off, worldY * CAVE.WARP_SCALE + off, 2) * 30;
+    const wy = worldY + this.noise.fbm2D(worldX * CAVE.WARP_SCALE + off + 50, worldY * CAVE.WARP_SCALE + off + 50, 2) * 30;
+    return this.noise.fbm2D(wx * CAVE.BASE_SCALE, wy * CAVE.BASE_SCALE, 2);
   }
 }
